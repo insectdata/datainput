@@ -47,8 +47,8 @@ td.num{width:110px}
 td.num .ctr{display:flex;align-items:center;gap:4px}
 td.num button{width:36px;height:36px;border:1px solid var(--line);background:#fff;border-radius:8px;font-size:18px}
 td.num input{width:48px;text-align:center;padding:6px 2px;border:1px solid var(--line);border-radius:8px;font-size:16px}
-td.del{width:40px;text-align:right}
-td.del button{border:0;background:transparent;color:var(--warn);font-size:18px;width:36px;height:36px}
+tr.zero td{color:var(--muted)}
+tr.zero td input{color:var(--muted)}
 td .sub{display:block;font-size:12px;color:var(--muted)}
 td .note{width:100%;border:0;border-bottom:1px dashed var(--line);padding:4px 0;font-size:13px;color:var(--ink);background:transparent}
 .empty{color:var(--muted);text-align:center;padding:16px 0;font-size:14px}
@@ -115,7 +115,7 @@ small.hint{color:var(--muted)}
 
   <section id="list-box" hidden>
     <h2><span id="list-title">この組み合わせの記録</span><button class="tog" id="tog-all">すべての未書き出しを見る</button></h2>
-    <table id="tbl"><thead><tr><th>和名</th><th>個体数</th><th></th></tr></thead><tbody></tbody></table>
+    <table id="tbl"><thead><tr><th>和名</th><th>個体数</th></tr></thead><tbody></tbody></table>
     <div class="empty" id="empty">まだ記録がありません。上の検索から種を追加してください。</div>
   </section>
 
@@ -169,10 +169,12 @@ small.hint{color:var(--muted)}
   <h3 id="edit-title">記録の編集</h3>
   <div class="row"><label>備考</label><input type="text" id="edit-note" placeholder="メモ（任意）"></div>
   <div class="row"><label>個体数</label><input type="text" id="edit-count" inputmode="numeric"></div>
+  <small class="hint">間違えて入れた種は − で 0 にすれば Excel に出ません。0 のまま残したくないときだけ下で消します</small>
   <div class="actions">
     <button class="btn sec" id="btn-edit-cancel">やめる</button>
     <button class="btn" id="btn-edit-save">保存</button>
   </div>
+  <div class="actions"><button class="btn warn" id="btn-edit-delete">この記録を端末から消す</button></div>
 </dialog>
 
 <div class="toast" id="toast"></div>

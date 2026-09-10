@@ -286,17 +286,20 @@ function renderList() {
     const sub = S.showAll ? `${r.季節} ${r.採集方法} ${r.地点}${r.その他 ? " " + r.その他 : ""}` : (r.備考 || "");
     const name = el("td", { onclick: () => openEdit(r) }, r.和名, el("span", { class: "sub" }, sub + (S.showAll && r.備考 ? "　" + r.備考 : "")));
     if (r.exported) name.insertBefore(el("span", { class: "pill", title: "書き出し済み。変えると未書き出しに戻ります" }, "済"), name.lastChild);
-    tb.append(el("tr", {}, name, el("td", { class: "num" }, ctr),
-      el("td", { class: "del" }, el("button", { onclick: () => remove(r), "aria-label": "削除" }, "🗑"))));
+    // ゴミ箱は置かない（誤タップで消えるのを避ける）。消したいときは − で 0 にする。0 の記録は Excel に出ない
+    tb.append(el("tr", { class: (parseInt(r.個体数, 10) || 0) > 0 ? "" : "zero" }, name, el("td", { class: "num" }, ctr)));
   }
   const all = mine();
-  const pend = all.filter((r) => !r.exported).length;
-  const done = all.length - pend;
+  const cnt = (r) => parseInt(r.個体数, 10) || 0;
+  const pend = all.filter((r) => !r.exported && cnt(r) > 0).length;   // 0 の記録は書き出さないので数えない
+  const zero = all.filter((r) => cnt(r) === 0).length;
+  const done = all.length - pend - zero;
   $("#pending").textContent = pend ? `未書き出し ${pend}` : "";
   $("#btn-export").disabled = !pend;
   $("#btn-export-all").disabled = !all.length;
   const others = S.records.length - all.length;
   $("#export-note").textContent = `この業務: 未書き出し ${pend} 件 ／ 書き出し済み ${done} 件`
+    + (zero ? ` ／ 個体数 0（Excel に出ない）${zero} 件` : "")
     + (others ? `（ほかの業務の記録 ${others} 件は隠れています）` : "")
     + `。書き出したファイルは業務フォルダの 入力/ に置いて、1_入力データをまとめる.bat に通します。`;
 }
@@ -305,12 +308,6 @@ async function setCount(r, v) {
   const n = Math.max(0, parseInt(v, 10) || 0);
   r.個体数 = n; r.updated = Date.now(); r.exported = 0;
   await putRecord(r);
-  renderList();
-}
-async function remove(r) {
-  if (!confirm(`「${r.和名}」の記録を削除しますか？`)) return;
-  await delRecord(r.id);
-  S.records = S.records.filter((x) => x.id !== r.id);
   renderList();
 }
 function openEdit(r) {
@@ -373,8 +370,8 @@ function buildXlsx(rows) {
   return zipStore(files);
 }
 async function exportRecords(all) {
-  const rows = mine().filter((r) => all || !r.exported).sort((a, b) => a.created - b.created);
-  if (!rows.length) { toast("書き出す記録がありません"); return; }
+  const rows = mine().filter((r) => (all || !r.exported) && (parseInt(r.個体数, 10) || 0) > 0).sort((a, b) => a.created - b.created);
+  if (!rows.length) { toast("書き出す記録がありません（個体数 0 の記録は出しません）"); return; }
   const bytes = buildXlsx(rows);
   const name = `${S.bundle.case || "入力"}_スマホ入力_${stamp()}.xlsx`;
   const blob = new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
@@ -569,6 +566,13 @@ async function boot() {
     renderList(); openMenu();
   };
   $("#btn-edit-cancel").onclick = () => $("#dlg-edit").close();
+  $("#btn-edit-delete").onclick = async () => {
+    const r = S.editing; if (!r) return;
+    if (!confirm(`「${r.和名}」のこの記録を端末から消します。よいですか？`)) return;
+    await delRecord(r.id);
+    S.records = S.records.filter((x) => x.id !== r.id);
+    $("#dlg-edit").close(); renderList();
+  };
   $("#btn-edit-save").onclick = async () => {
     const r = S.editing; if (!r) return;
     r.備考 = $("#edit-note").value.trim();

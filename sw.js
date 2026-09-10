@@ -1,7 +1,7 @@
 /* 画面のファイルを端末に保持して、圏外でも開けるようにする。
  * 業務ファイル（スマホ用.json）はここでは扱わない。あれは IndexedDB に入る。
  * 画面を更新したら VERSION を上げる。 */
-const VERSION = "konchu-input-v9";
+const VERSION = "konchu-input-v10";
 const SHELL = ["./", "./index.html", "./app.js", "./manifest.webmanifest", "./icon.svg", "./icon-180.png", "./icon-192.png", "./icon-512.png"];
 
 self.addEventListener("install", (e) => {
