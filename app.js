@@ -95,6 +95,8 @@ async function applyBundle(b) {
   for (const r of S.records) {
     if (!r.業務) { r.業務 = b.case; await putRecord(r); }
   }
+  // 和名 → 種（一覧の行に重要種・外来種の印を出すため）
+  S.byName = new Map(b.species.map((sp) => [sp[0], sp]));
   const def = (b.masters || []).find((m) => m[0] === (b.masterDefault || "統合"));
   const saved = await kvGet("masterBit");
   S.masterBit = saved || (def ? def[1] : 1);
@@ -230,11 +232,24 @@ function search() {
   for (const sp of list) {
     const exact = sp[5] === q, n = used(sp);
     const ja = el("span", { class: "ja" + (exact ? " exact" : "") }, sp[0]);
+    ja.append(...marks(sp));
     if (n) ja.append(el("span", { class: "pill", title: "これまでの採用回数" }, `×${n}`));
     hits.append(el("li", { onclick: () => addSpecies(sp) }, ja,
       el("span", { class: "sub" }, `${sp[2] || ""}　${sp[1] || ""}`)));
   }
   hits.hidden = false;
+}
+// 重要種・外来種の印。業務ファイルの rdbCols（調査設定「重要種」シートの ○）と species の 7 番目から
+function marks(sp) {
+  const cols = (S.bundle && S.bundle.rdbCols) || [];
+  const out = [];
+  for (const [i, v] of (sp && sp[6]) || []) {
+    const c = cols[i]; if (!c) continue;
+    const alien = c[2] === "外来種";
+    out.push(el("span", { class: "tag " + (alien ? (v === "特定" ? "tokutei" : "alien") : "rdb"), title: `${c[0]}: ${v}` },
+      alien ? v : `${c[1]} ${v}`));
+  }
+  return out;
 }
 async function addSpecies(sp) {
   if (!axesReady()) { toast("先に 季節・採集方法・地点 を選んでください"); return; }
@@ -285,6 +300,7 @@ function renderList() {
       el("button", { onclick: () => bump(r, +1), "aria-label": "増やす" }, "＋"));
     const sub = S.showAll ? `${r.季節} ${r.採集方法} ${r.地点}${r.その他 ? " " + r.その他 : ""}` : (r.備考 || "");
     const name = el("td", { onclick: () => openEdit(r) }, r.和名, el("span", { class: "sub" }, sub + (S.showAll && r.備考 ? "　" + r.備考 : "")));
+    for (const m of marks(S.byName && S.byName.get(r.和名))) name.insertBefore(m, name.lastChild);
     if (r.exported) name.insertBefore(el("span", { class: "pill", title: "書き出し済み。変えると未書き出しに戻ります" }, "済"), name.lastChild);
     // ゴミ箱は置かない（誤タップで消えるのを避ける）。消したいときは − で 0 にする。0 の記録は Excel に出ない
     tb.append(el("tr", { class: (parseInt(r.個体数, 10) || 0) > 0 ? "" : "zero" }, name, el("td", { class: "num" }, ctr)));
