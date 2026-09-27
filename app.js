@@ -7,6 +7,7 @@
 (() => {
 "use strict";
 
+const APP_VERSION = "v14";   // 画面の版（sw.js の VERSION と合わせる。☰ に出す）
 const AXES = ["季節", "採集方法", "地点", "その他"];
 const COLS = ["和名", "個体数", "採集方法", "地点", "その他", "季節", "備考", "採集日"];
 const $ = (s) => document.querySelector(s);
@@ -229,7 +230,7 @@ function search() {
   if (!list.length) {
     hits.append(el("li", { class: "none" }, "候補がありません。綴りを変えるか、設定でマスタを切り替えてください"));
   }
-  const picks = S.bundle.picks || {}, dist = S.bundle.dist || {};
+  const picks = S.bundle.picks || {}, dist = S.bundle.dist || {}, notes = S.bundle.notes || {};
   for (const sp of list) {
     const exact = sp[5] === q, n = used(sp);
     const ja = el("span", { class: "ja" + (exact ? " exact" : "") }, sp[0]);
@@ -239,6 +240,8 @@ function search() {
     const sub = el("span", { class: "sub" }, `${sp[2] || ""}　${sp[1] || ""}`);
     // 亜種が 2 つ以上ある種は分布も出す（どの亜種か選ぶ手がかり。2026-09-27）
     if (dist[sp[0]]) sub.append(el("span", { class: "dist" }, `分布: ${dist[sp[0]]}`));
+    // 工房の注記（目録のみ・水国のみ・和名同・学名異 など）。シノニムに気付く手がかり（2026-09-27）
+    if (notes[sp[0]]) sub.append(el("span", { class: "dist note" }, notes[sp[0]]));
     hits.append(el("li", { onclick: () => (picks[sp[0]] ? openPick(sp) : addSpecies(sp)) }, ja, sub));
   }
   hits.hidden = false;
@@ -273,7 +276,8 @@ function openPick(sp) {
     if (ja === sp[0]) continue;
     const x = bySp.get(ja) || [ja, sci, "", "", 7, ja];
     ul.append(el("li", { onclick: () => choose(x) }, el("b", {}, ja), el("small", {}, sci || ""),
-      el("small", { class: "dist" }, di ? `分布: ${di}` : "")));
+      el("small", { class: "dist" }, di ? `分布: ${di}` : ""),
+      el("small", { class: "dist" }, (S.bundle.notes || {})[ja] || "")));
   }
   d.append(ul, el("div", { class: "actions" }, el("button", { class: "btn sec", onclick: close }, "やめる")));
   document.body.append(d);
@@ -565,7 +569,7 @@ function renderMasterSelect() {
   sel.value = S.masterBit;
   sel.onchange = async () => { S.masterBit = parseInt(sel.value, 10); await kvSet("masterBit", S.masterBit); search(); };
   $("#master-hint").textContent = `業務の既定は「${S.bundle.masterDefault || "統合"}」。入力の候補に使うだけで、PC側の集計には影響しません。`;
-  $("#bundle-info").textContent = `${S.bundle.case}　作成 ${S.bundle.made}　和名 ${S.bundle.species.length.toLocaleString()} 件`;
+  $("#bundle-info").textContent = `${S.bundle.case}　作成 ${S.bundle.made}　和名 ${S.bundle.species.length.toLocaleString()} 件　（画面 ${APP_VERSION}）`;
 }
 function openMenu() {
   if (S.bundle) renderMasterSelect();
