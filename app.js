@@ -229,13 +229,17 @@ function search() {
   if (!list.length) {
     hits.append(el("li", { class: "none" }, "候補がありません。綴りを変えるか、設定でマスタを切り替えてください"));
   }
+  const picks = S.bundle.picks || {}, dist = S.bundle.dist || {};
   for (const sp of list) {
     const exact = sp[5] === q, n = used(sp);
     const ja = el("span", { class: "ja" + (exact ? " exact" : "") }, sp[0]);
     ja.append(...marks(sp));
+    if (picks[sp[0]]) ja.append(el("span", { class: "tag pick", title: "誤同定の名など。押すと説明と候補が出ます" }, "要選択"));
     if (n) ja.append(el("span", { class: "pill", title: "これまでの採用回数" }, `×${n}`));
-    hits.append(el("li", { onclick: () => addSpecies(sp) }, ja,
-      el("span", { class: "sub" }, `${sp[2] || ""}　${sp[1] || ""}`)));
+    const sub = el("span", { class: "sub" }, `${sp[2] || ""}　${sp[1] || ""}`);
+    // 亜種が 2 つ以上ある種は分布も出す（どの亜種か選ぶ手がかり。2026-09-27）
+    if (dist[sp[0]]) sub.append(el("span", { class: "dist" }, `分布: ${dist[sp[0]]}`));
+    hits.append(el("li", { onclick: () => (picks[sp[0]] ? openPick(sp) : addSpecies(sp)) }, ja, sub));
   }
   hits.hidden = false;
 }
@@ -250,6 +254,30 @@ function marks(sp) {
       alien ? v : `${c[1]} ${v}`));
   }
   return out;
+}
+// 選ばせる名前（誤同定の名など。工房のシノニムリスト「選ばせる名前」から。2026-09-27）: 説明と候補（分布つき）を出して選ばせる
+function openPick(sp) {
+  const p = S.bundle.picks[sp[0]];
+  const bySp = new Map(S.bundle.species.map((x) => [x[0], x]));
+  const d = el("dialog", { class: "pick" });
+  const close = () => { d.close(); d.remove(); };
+  const choose = (x) => { close(); addSpecies(x); };
+  d.append(el("h3", {}, `「${sp[0]}」はどの種ですか`));
+  if (p.note) d.append(el("p", { class: "note" }, p.note));
+  const ul = el("ul", { class: "cands" });
+  const self = (p.cands || []).find((c) => c[0] === sp[0]);   // 同じ和名の候補は「今の名前のまま」の行にまとめる
+  ul.append(el("li", { onclick: () => choose(sp) }, el("b", {}, `${sp[0]}（今の名前のまま）`),
+    el("small", {}, (sp[1] || "") + (self && self[1] && self[1] !== sp[1] ? `（今の学名 ${self[1]}）` : "")),
+    el("small", { class: "dist" }, self && self[2] ? `分布: ${self[2]}` : "")));
+  for (const [ja, sci, di] of p.cands || []) {
+    if (ja === sp[0]) continue;
+    const x = bySp.get(ja) || [ja, sci, "", "", 7, ja];
+    ul.append(el("li", { onclick: () => choose(x) }, el("b", {}, ja), el("small", {}, sci || ""),
+      el("small", { class: "dist" }, di ? `分布: ${di}` : "")));
+  }
+  d.append(ul, el("div", { class: "actions" }, el("button", { class: "btn sec", onclick: close }, "やめる")));
+  document.body.append(d);
+  d.showModal();
 }
 async function addSpecies(sp) {
   if (!axesReady()) { toast("先に 季節・採集方法・地点 を選んでください"); return; }
