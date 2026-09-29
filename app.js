@@ -7,7 +7,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "v15";   // 画面の版（sw.js の VERSION と合わせる。☰ に出す）
+const APP_VERSION = "v16";   // 画面の版（sw.js の VERSION と合わせる。☰ に出す）
 const AXES = ["季節", "採集方法", "地点", "その他"];
 const COLS = ["和名", "個体数", "採集方法", "地点", "その他", "季節", "備考", "採集日"];
 const $ = (s) => document.querySelector(s);
@@ -98,6 +98,14 @@ async function applyBundle(b) {
   }
   // 和名 → 種（一覧の行に重要種・外来種の印を出すため）
   S.byName = new Map(b.species.map((sp) => [sp[0], sp]));
+  // 旧名（シノニム名。名前引き台帳の 名前の変遷 から。2026-09-29）: [旧名, [species の行の番号…], 印（1＝ほかの種にも使われた名前）]
+  S.olds = (b.olds || []).map(([n, t, f]) => ({ k: skey(n), n, t, f }));
+  S.oldNames = new Map();                          // 和名 → その種の旧名（候補の行に「旧名: …」を短く出す）
+  for (const o of S.olds) for (const i of o.t) {
+    const w = (b.species[i] || [])[0]; if (!w) continue;
+    if (!S.oldNames.has(w)) S.oldNames.set(w, []);
+    S.oldNames.get(w).push(o.n + (o.f ? "※" : ""));
+  }
   const def = (b.masters || []).find((m) => m[0] === (b.masterDefault || "統合"));
   const saved = await kvGet("masterBit");
   S.masterBit = saved || (def ? def[1] : 1);
@@ -227,7 +235,19 @@ function search() {
   const list = rank(pre).slice(0, 40);
   if (list.length < 40) list.push(...rank(mid).slice(0, 40 - list.length));
   list.push(...rank(sci).slice(0, 10));
-  if (!list.length) {
+  // 旧名で探す（先頭一致。2 字から）: 打った旧名の今の種を 候補の後ろに出す
+  const oldHits = [];
+  if (q.length >= 2) {
+    for (const o of S.olds) {
+      if (!o.k.startsWith(q)) continue;
+      for (const i of o.t) {
+        const sp = S.bundle.species[i];
+        if (sp && (sp[4] & S.masterBit)) oldHits.push([sp, o]);
+      }
+      if (oldHits.length >= 12) break;
+    }
+  }
+  if (!list.length && !oldHits.length) {
     hits.append(el("li", { class: "none" }, "候補がありません。綴りを変えるか、設定でマスタを切り替えてください"));
   }
   const picks = S.bundle.picks || {}, dist = S.bundle.dist || {}, notes = S.bundle.notes || {};
@@ -242,6 +262,15 @@ function search() {
     if (dist[sp[0]]) sub.append(el("span", { class: "dist" }, `分布: ${dist[sp[0]]}`));
     // 工房の注記（目録のみ・水国のみ・和名同・学名異 など）。シノニムに気付く手がかり（2026-09-27）
     if (notes[sp[0]]) sub.append(el("span", { class: "dist note" }, notes[sp[0]]));
+    const on = S.oldNames.get(sp[0]);
+    if (on) sub.append(el("span", { class: "dist old" }, "旧名: " + on.slice(0, 3).join("、") + (on.length > 3 ? " ほか" : "")));
+    hits.append(el("li", { onclick: () => (picks[sp[0]] ? openPick(sp) : addSpecies(sp)) }, ja, sub));
+  }
+  for (const [sp, o] of oldHits) {
+    const ja = el("span", { class: "ja" }, sp[0]);
+    ja.append(...marks(sp), el("span", { class: "tag old", title: "打った名前は この種の旧名（シノニム）" }, "旧名"));
+    const sub = el("span", { class: "sub" }, `${sp[2] || ""}　${sp[1] || ""}`);
+    sub.append(el("span", { class: "dist old" }, `旧名「${o.n}」` + (o.f ? " ※ほかの種にも使われた名" : "")));
     hits.append(el("li", { onclick: () => (picks[sp[0]] ? openPick(sp) : addSpecies(sp)) }, ja, sub));
   }
   hits.hidden = false;
