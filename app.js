@@ -7,7 +7,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "v16";   // 画面の版（sw.js の VERSION と合わせる。☰ に出す）
+const APP_VERSION = "v21";   // 画面の版（sw.js の VERSION と合わせる。☰ に出す）
 const AXES = ["季節", "採集方法", "地点", "その他"];
 const COLS = ["和名", "個体数", "採集方法", "地点", "その他", "季節", "備考", "採集日"];
 const $ = (s) => document.querySelector(s);
@@ -60,6 +60,7 @@ const S = {
   records: [],         // 端末内の全記録
   usage: {},           // 和名 → 採用回数（候補の並びに使う。端末内に保存）
   showAll: false,
+  recentTop: false,   // true: 入れた・変えた種を一覧の上に出す（☰ の設定。既定は入れた順で動かさない）
   editing: null,
 };
 const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
@@ -287,6 +288,19 @@ function marks(sp) {
   }
   return out;
 }
+// 記録の表の和名の下に出す短い印（全NT・熊VU・特定）。環境省は「全」、県は頭の 1 字、外来種は頭を付けず色で分ける
+function shortMarks(sp) {
+  const cols = (S.bundle && S.bundle.rdbCols) || [];
+  const out = el("span", { class: "marks" });
+  for (const [i, v] of (sp && sp[6]) || []) {
+    const c = cols[i]; if (!c) continue;
+    const alien = c[2] === "外来種";
+    const head = alien ? "" : /^環境省/.test(c[1] || c[0]) ? "全" : (c[1] || c[0]).charAt(0);
+    if (out.childNodes.length) out.append("・");
+    out.append(el("span", { class: alien ? (v === "特定" ? "tokutei" : "alien") : "rdb", title: `${c[0]}: ${v}` }, head + v));
+  }
+  return out.childNodes.length ? out : null;
+}
 // 選ばせる名前（誤同定の名など。工房のシノニムリスト「選ばせる名前」から。2026-09-27）: 説明と候補（分布つき）を出して選ばせる
 function openPick(sp) {
   const p = S.bundle.picks[sp[0]];
@@ -350,9 +364,10 @@ function renderList() {
   // 組み合わせの一覧は書き出し済みも見せる（読み込んだ記録や前日の記録に足せるように）。
   // 「すべての未書き出し」は文字どおり未書き出しだけ。
   let rows = S.showAll ? mine().filter((r) => !r.exported) : mine().filter((r) => comboKey(r) === key);
-  rows.sort((a, b) => b.updated - a.updated);
-  $("#list-title").textContent = S.showAll ? `すべての未書き出し（${rows.length}）` : `この組み合わせの記録（${rows.length}）`;
-  $("#tog-all").textContent = S.showAll ? "この組み合わせだけ見る" : "すべての未書き出しを見る";
+  // 既定は入れた順（新しい種は下に足す。＋−や同じ種の追加では動かさない＝連打で別の種を押さないように）
+  rows.sort(S.recentTop ? (a, b) => b.updated - a.updated : (a, b) => (a.created - b.created) || (a.id - b.id));
+  $("#list-title").textContent = S.showAll ? `未書き出し（${rows.length}）` : `今の地点（${rows.length}）`;
+  $("#tog-all").textContent = S.showAll ? "今の地点" : "未書き出し";
   $("#empty").hidden = rows.length > 0;
   for (const r of rows) {
     const ctr = el("div", { class: "ctr" },
@@ -361,7 +376,8 @@ function renderList() {
       el("button", { onclick: () => bump(r, +1), "aria-label": "増やす" }, "＋"));
     const sub = S.showAll ? `${r.季節} ${r.採集方法} ${r.地点}${r.その他 ? " " + r.その他 : ""}` : (r.備考 || "");
     const name = el("td", { onclick: () => openEdit(r) }, r.和名, el("span", { class: "sub" }, sub + (S.showAll && r.備考 ? "　" + r.備考 : "")));
-    for (const m of marks(S.byName && S.byName.get(r.和名))) name.insertBefore(m, name.lastChild);
+    const ms = shortMarks(S.byName && S.byName.get(r.和名));
+    if (ms) name.insertBefore(ms, name.lastChild);
     if (r.exported) name.insertBefore(el("span", { class: "pill", title: "書き出し済み。変えると未書き出しに戻ります" }, "済"), name.lastChild);
     // ゴミ箱は置かない（誤タップで消えるのを避ける）。消したいときは − で 0 にする。0 の記録は Excel に出ない
     tb.append(el("tr", { class: (parseInt(r.個体数, 10) || 0) > 0 ? "" : "zero" }, name, el("td", { class: "num" }, ctr)));
@@ -611,6 +627,7 @@ function openMenu() {
   const nu = Object.keys(S.usage).length;
   $("#usage-info").textContent = nu ? `${nu} 種の採用回数を覚えています（多い種ほど候補の上に出ます）` : "まだ採用回数の記録はありません";
   $("#btn-clear-usage").disabled = !nu;
+  $("#chk-recent-top").checked = S.recentTop;
   $("#dlg-menu").showModal();
 }
 
@@ -619,6 +636,8 @@ async function boot() {
   await openDB();
   S.records = await allRecords();
   S.usage = (await kvGet("usage")) || {};
+  S.recentTop = !!(await kvGet("recentTop"));
+  $("#chk-recent-top").onchange = async (e) => { S.recentTop = e.target.checked; await kvSet("recentTop", S.recentTop); renderList(); };
   $("#btn-clear-usage").onclick = async () => {
     const n = Object.keys(S.usage).length;
     if (!n || !confirm(`${n} 種ぶんの採用回数を消して、候補の並びを五十音順に戻します。よいですか？`)) return;
