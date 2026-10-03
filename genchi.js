@@ -11,7 +11,7 @@
  */
 (() => {
 "use strict";
-const GENCHI_VERSION = "g2";
+const GENCHI_VERSION = "g6";
 const $ = (s) => document.querySelector(s);
 const el = (t, attrs = {}, ...kids) => {
   const e = document.createElement(t);
@@ -28,10 +28,36 @@ const pad = (n) => String(n).padStart(2, "0");
 const ymd = (d = new Date()) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 const hm = (d) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 const stamp = () => { const d = new Date(); return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}`; };
-const KUBUN = ["重要種", "確認種", "環境"];
-const KCOLOR = { 重要種: "#c62828", 確認種: "#1565c0", 環境: "#2e7d32" };
-const WORDS = ["河川敷", "堤防法面", "水際", "草地", "林縁", "樹林内", "竹林", "畑", "水田", "畦", "湿地", "水路", "路傍", "人家周辺", "裸地", "石の下", "朽木"];
-const METHODS = ["目視", "鳴き声", "足跡", "糞", "食痕", "巣", "掘り返し", "死体", "捕獲", "トラップ", "無人撮影", "写真"];
+const KUBUN = ["重要種", "確認種", "要確認", "環境"];   // 要確認＝持ち帰って調べる（和名は仮でも空でもよい。集計の入力データに出さない）
+const KCOLOR = { 重要種: "#c62828", 確認種: "#1565c0", 要確認: "#ef6c00", 環境: "#2e7d32" };
+// 生息環境は 植生図の細分でなく おおまかな区分で（祝 2026-10-04）。植生図の凡例はこの区分に寄せて札の先頭に出す
+const HABITATS = ["常緑広葉樹林", "落葉広葉樹林", "針葉樹林（植林）", "竹林", "低木林", "林縁", "イネ科草地", "広葉草地", "湿性草地", "ヨシ原",
+  "河原", "水際", "水田", "畑", "果樹園", "水路", "池沼", "堤防法面", "人家周辺", "公園・緑地", "裸地・造成地"];
+const METHODS = ["目視", "鳴き声", "捕獲", "トラップ", "無人撮影", "写真"];
+// 確認したものの区分（成虫・幼虫・痕跡など。いくつでも）
+const STAGES = ["成虫", "蛹", "幼虫", "卵", "成体", "幼体", "幼生", "成獣", "幼獣", "足跡", "糞", "食痕", "巣", "鳴き声", "死体", "脱皮殻"];
+// メモの札（「イネ科植物 でスウィーピング」「セイタカアワダチソウ に訪花」のように 名詞＋動き で組む）
+const MEMO_ACTS = ["でスウィーピング", "でビーティング", "で見つけ取り", "に訪花", "を吸蜜", "の葉上", "の樹幹", "の樹液", "の石下", "の朽木中",
+  "で灯火に飛来", "の水中", "で鳴き声", "を目撃", "で捕獲"];
+const MEMO_NOUNS = ["イネ科植物", "広葉草本", "樹林内", "林縁", "草地", "水際"];
+function habitatOf(vegName) {
+  const n = vegName || "";
+  if (/植林|スギ|ヒノキ|マツ/.test(n)) return "針葉樹林（植林）";
+  if (/竹|ササ/.test(n)) return "竹林";
+  if (/シイ|カシ|タブ|ヤブツバキ|照葉|常緑/.test(n)) return "常緑広葉樹林";
+  if (/クヌギ|コナラ|アカメガシワ|ヤナギ|ケヤキ|エノキ|ムクノキ|落葉|二次林/.test(n)) return "落葉広葉樹林";
+  if (/ヨシ|ツルヨシ/.test(n)) return "ヨシ原";
+  if (/ススキ|チガヤ|シバ|オギ|ネザサ|イネ科/.test(n)) return "イネ科草地";
+  if (/水田/.test(n)) return "水田";
+  if (/畑/.test(n)) return "畑";
+  if (/果樹|茶/.test(n)) return "果樹園";
+  if (/開放水域|水域/.test(n)) return "池沼";
+  if (/自然裸地|河原/.test(n)) return "河原";
+  if (/市街|住宅|工場|造成|道路/.test(n)) return /造成/.test(n) ? "裸地・造成地" : "人家周辺";
+  if (/緑の多い|公園|ゴルフ/.test(n)) return "公園・緑地";
+  if (/雑草|クズ|セイタカ|群落/.test(n)) return "広葉草地";
+  return "";
+}
 const FIG_DEF = { 図の名前: "重要種等確認位置図", 項目: "陸上昆虫類", 背景: "標準地図", 植生: false, 拡大図: true };
 
 // ---------------------------------------------------------------- 保存（IndexedDB）
@@ -63,6 +89,8 @@ const delPhoto = (id) => req("photos", "readwrite", (s) => s.delete(id));
 function readMainBundle() {
   return new Promise((ok) => {
     const r = indexedDB.open("konchu-input");
+    // まだ種名の入力画面を開いていない端末では作らない（ここで空の入れ物を作ると 入力画面が保存できなくなる）
+    r.onupgradeneeded = () => { r.transaction.abort(); };
     r.onsuccess = () => {
       const d = r.result;
       if (!d.objectStoreNames.contains("kv")) { d.close(); ok({}); return; }
@@ -97,7 +125,8 @@ function marksOf(name) {
   }
   return out;
 }
-const recLabel = (r) => r.和名 ? r.和名 + (marksOf(r.和名).length ? `（${marksOf(r.和名).map((m) => m.text).join("・")}）` : "") : (r.環境 ? "環境: " + r.環境.split(/[、,]/)[0] : "環境");
+const recLabel0 = (r) => r.区分 === "要確認" ? "要確認" + (r.和名 ? `: ${r.和名}?` : "") : r.和名 ? r.和名 + (marksOf(r.和名).length ? `（${marksOf(r.和名).map((m) => m.text).join("・")}）` : "") : (r.環境 ? "環境: " + r.環境.split(/[、,]/)[0] : "環境");
+const recLabel = (r) => recLabel0(r) + (r.状態 ? " " + r.状態 : "");
 
 // ---------------------------------------------------------------- 距離・方向・範囲
 const R = 6371000;
@@ -259,6 +288,7 @@ function measure() {
 // ---------------------------------------------------------------- 地点
 function ptColor(p) {
   if (p.recs.some((r) => r.区分 === "重要種")) return KCOLOR.重要種;
+  if (p.recs.some((r) => r.区分 === "要確認")) return KCOLOR.要確認;
   if (p.recs.some((r) => r.区分 === "確認種")) return KCOLOR.確認種;
   return p.recs.length ? KCOLOR.環境 : "#757575";
 }
@@ -286,7 +316,7 @@ function leaveOk() {
   if (!confirm("入力の途中です。保存せずに閉じますか？（保存するなら「やめる」で戻って OK を押す）")) return false;
   S.dirty = false; S.editing = null; return true;
 }
-async function newPoint() {
+async function newPoint(preset) {
   if (!leaveOk()) return;
   const pos = await measure();
   let lat, lon, acc = null, how;
@@ -299,7 +329,7 @@ async function newPoint() {
   S.points.push(p);
   drawPoints();
   map.setView([lat, lon], Math.max(map.getZoom(), 17));
-  openPoint(p, true);
+  if (preset) openForm(p, -1, preset); else openPoint(p, true);
   return p;
 }
 function openPoint(p, startForm) {
@@ -317,19 +347,39 @@ function openPoint(p, startForm) {
     el("button", { class: "btn sec small", onclick: () => toggleMove(p) }, S.moving ? "位置を決めた" : "位置を動かす"),
     el("button", { class: "btn sec small", onclick: () => showFigure(p.day, p) }, "位置図"),
     el("button", { class: "btn warn small", onclick: () => removePoint(p) }, "地点を消す"));
+  // GPS のプロット番号と使った GPS（ガーミンなどで取った地点の番号。機種は前に書いたものを入れておく。祝 2026-10-04）
+  if (p.gps機種 == null) p.gps機種 = S.gpsModel || "";
+  const saveGps = async () => { await putPoint(p); if (p.gps機種) { S.gpsModel = p.gps機種; kvSet("gpsModel", p.gps機種); } };
+  const gps = el("div", { class: "two", style: "margin:2px 0" },
+    el("div", {}, el("label", {}, "GPS のプロット番号"), el("input", { type: "text", value: p.gps番号 || "", placeholder: "例 031", onchange: (e) => { p.gps番号 = e.target.value.trim(); saveGps(); } })),
+    el("div", {}, el("label", {}, "使った GPS"), el("input", { type: "text", value: p.gps機種 || "", placeholder: "例 eTrex Touch", list: "gps-models",
+      onchange: (e) => { p.gps機種 = e.target.value.trim(); saveGps(); } }),
+      el("datalist", { id: "gps-models" }, ...["eTrex Touch", "GPSMAP", "スマホの GPS", "Geographica"].map((v) => el("option", { value: v })))));
   const ul = el("ul", { class: "recs" });
   p.recs.forEach((r, i) => {
     const ms = marksOf(r.和名);
-    const t = el("div", { class: "t" }, el("span", { class: "kb " + r.区分 }, r.区分), r.和名 || (r.環境 || "（環境）"),
+    const t = el("div", { class: "t" }, el("span", { class: "kb " + r.区分 }, r.区分), r.和名 ? r.和名 + (r.区分 === "要確認" ? "?" : "") : r.区分 === "要確認" ? "（名前は持ち帰って調べる）" : (r.環境 || "（環境）"),
       ...ms.map((m) => el("span", { class: "tag" + (m.alien ? " alien" : ""), title: m.full }, m.text)),
       r.個体数 ? el("small", { style: "color:var(--muted)" }, ` ${r.個体数}`) : null,
+      r.状態 ? el("small", { style: "color:var(--muted)" }, ` ${r.状態}`) : null,
       r.方法 ? el("small", { style: "color:var(--muted)" }, ` ${r.方法}`) : null,
       r.メモ ? el("div", { class: "meta" }, r.メモ) : null);
     const th = el("div", { class: "thumbs" });
     for (const pid of (r.photos || []).slice(0, 3)) thumbImg(pid).then((im) => im && th.append(im));
     ul.append(el("li", { onclick: () => openForm(p, i) }, t, th));
   });
-  pan.append(head, meta, tools, ul, el("div", { class: "row" }, el("button", { class: "btn", onclick: () => openForm(p, -1) }, "＋ 記録を足す")));
+  const shot = el("input", { type: "file", accept: "image/*", capture: "environment", multiple: true, style: "display:none" });
+  shot.onchange = async (e) => {          // 地点・環境・写真だけ（てるをくん 2026-10-04）。撮るとすぐ 環境 の記録として保存
+    const ids = [];
+    for (const fl of e.target.files) { const pid = await savePhoto(fl, "近景"); if (pid) ids.push(pid); }
+    e.target.value = "";
+    if (!ids.length) return;
+    p.recs.push({ 区分: "環境", 和名: "", 個体数: "", 方法: "", 環境: habitatOf(p.veg) || "", 植物: "", メモ: "", photos: ids, time: Date.now(),
+      季節: S.axes["季節"] || "", 調査地点: S.axes["地点"] || "", その他: S.axes["その他"] || "" });
+    await putPoint(p); drawPoints(); openPoint(p); toast(`地点 ${p.no} に 環境の写真 ${ids.length} 枚を保存しました`);
+  };
+  pan.append(head, meta, tools, ...(S.fields.GPS !== false ? [gps] : []), ul, el("div", { class: "row" }, el("button", { class: "btn", onclick: () => openForm(p, -1) }, "＋ 記録を足す"),
+    el("button", { class: "btn sec", onclick: () => shot.click() }, "📷 環境の写真だけ"), shot));
   pan.style.display = "block";
   if (startForm) openForm(p, -1);
 }
@@ -360,9 +410,12 @@ async function removePoint(p) {
 }
 
 // ---------------------------------------------------------------- 記録の入力欄
+// 写真の種類（個体・近景・遠景・環境）。重要種の場所は近景・遠景を何枚も撮る（祝 2026-10-04）
+const PHOTO_KINDS = ["個体", "近景", "遠景"];
 async function thumbImg(pid) {
   const ph = await getPhoto(pid); if (!ph) return null;
-  return el("img", { src: ph.thumb, alt: "", onclick: (e) => { e.stopPropagation(); showBig(pid); } });
+  return el("span", { class: "th", onclick: (e) => { e.stopPropagation(); showBig(pid); } },
+    el("img", { src: ph.thumb, alt: "" }), ph.種類 ? el("b", {}, ph.種類) : null);
 }
 function chipRow(words, target, onChange) {
   const box = el("div", { class: "chips" });
@@ -386,9 +439,9 @@ function lastLike(p) {
   const near = cands.filter((c) => c.d <= 200).sort((a, b) => b.t - a.t);
   return (near[0] || cands.sort((a, b) => b.t - a.t)[0]).r;
 }
-function openForm(p, idx) {
+function openForm(p, idx, preset) {
   openPoint(p);
-  const r = idx >= 0 ? JSON.parse(JSON.stringify(p.recs[idx])) : { 区分: "重要種", 和名: "", 個体数: "", 方法: S.axes["採集方法"] || "", 環境: "", 植物: "", メモ: "", photos: [] };
+  const r = idx >= 0 ? JSON.parse(JSON.stringify(p.recs[idx])) : { 区分: "重要種", 和名: "", 個体数: "", 方法: S.axes["採集方法"] || "", 環境: "", 植物: "", メモ: "", photos: [], ...(preset || {}) };
   S.editing = { p, idx, r };
   const dirty = () => { S.dirty = true; };
   const f = el("form", { oninput: dirty, onsubmit: (e) => { e.preventDefault(); saveForm(); } });
@@ -396,56 +449,92 @@ function openForm(p, idx) {
   const nameBox = el("div", {});
   for (const k of KUBUN) seg.append(el("button", { type: "button", class: k + (r.区分 === k ? " on" : ""), onclick: () => {
     r.区分 = k; dirty(); [...seg.children].forEach((b) => b.classList.toggle("on", b.textContent === k)); nameBox.style.display = k === "環境" ? "none" : "";
+    nameLabel.textContent = k === "要確認" ? "和名（仮の名前でよい。○○属の一種 など。空でもよい）" : "和名";
   } }, k));
   // 和名（索引から。旧名でも引ける）
   const q = el("input", { type: "search", placeholder: S.bundle ? "和名（カタカナ・ひらがな）" : "業務ファイルが無いので自由に書く", value: r.和名, autocomplete: "off" });
+  const nameLabel = el("label", {}, r.区分 === "要確認" ? "和名（仮の名前でよい。○○属の一種 など。空でもよい）" : "和名");
   const hits = el("ul", { class: "hits", style: "display:none" });
   const chosen = el("div", { class: "meta" });
   const showChosen = () => { const ms = marksOf(r.和名); chosen.textContent = r.和名 ? `→ ${r.和名}` + (ms.length ? "　" + ms.map((m) => m.text).join("・") : "") : ""; };
   q.oninput = () => { r.和名 = q.value.trim(); showChosen(); searchName(q.value, hits, (sp) => { r.和名 = sp[0]; q.value = sp[0]; hits.style.display = "none"; showChosen(); dirty(); }); };
   showChosen();
   nameBox.style.display = r.区分 === "環境" ? "none" : "";
-  nameBox.append(el("label", {}, "和名"), q, hits, chosen,
-    el("div", { class: "two" },
-      el("div", {}, el("label", {}, "個体数"), el("input", { type: "text", inputmode: "numeric", value: r.個体数, oninput: (e) => { r.個体数 = e.target.value; } })),
-      el("div", {}, el("label", {}, "方法（確認の種類）"), methodInput(r))));
-  // 環境・植物（札で入れて書き足せる）
+  // 種名の入力画面で数えた種（📍から来た）は、書き出しの入力データ（集計）に出さない（二重に数えない）
+  const counted = el("label", { style: "color:var(--ink);font-size:13px;display:flex;gap:6px;align-items:center" },
+    el("input", { type: "checkbox", onchange: (e) => { r.数え済み = e.target.checked; dirty(); } }),
+    "種名の入力画面で数えた（集計の入力データに出さない）");
+  counted.querySelector("input").checked = !!r.数え済み;
+  const on = (k) => FIXED.has(k) || S.fields[k] !== false;           // ☰ の「入力欄に出す項目」（業務ごと。発注者・調査項目で変わる。祝 2026-10-04）
+  nameBox.append(...[nameLabel, q, hits, chosen, on("数え済み") ? counted : null,
+    (on("個体数") || on("方法")) ? el("div", { class: "two" },
+      on("個体数") ? el("div", {}, el("label", {}, "個体数"), el("input", { type: "text", inputmode: "numeric", value: r.個体数, oninput: (e) => { r.個体数 = e.target.value; } })) : null,
+      on("方法") ? el("div", {}, el("label", {}, "方法"), methodInput(r)) : null) : null].filter(Boolean));
+  // 確認したもの（成虫・蛹・幼虫・卵・成体・幼体・幼生・成獣・幼獣・足跡・糞・食痕 など。いくつでも。押すと入・切。よく使うものが前）
+  const stageBox = el("div", { class: "chips" });
+  const stages = new Set((r.状態 || "").split("・").filter(Boolean));
+  const stageOrder = [...STAGES].sort((a, b) => (S.usage["状態:" + b] || 0) - (S.usage["状態:" + a] || 0));
+  const drawStages = () => { stageBox.innerHTML = ""; for (const s of stageOrder) stageBox.append(el("button", { type: "button", class: stages.has(s) ? "on" : "",
+    onclick: () => { stages.has(s) ? stages.delete(s) : stages.add(s); r.状態 = STAGES.filter((x) => stages.has(x)).concat([...stages].filter((x) => !STAGES.includes(x))).join("・"); dirty(); drawStages(); } }, s)); };
+  drawStages();
+  // 生息環境（おおまかな区分。植生図の凡例をその区分に寄せて先頭に）・周囲の植物
   const env = el("textarea", { rows: 2, placeholder: "札を押すと入る。書き足しもできる", oninput: (e) => { r.環境 = e.target.value; } }); env.value = r.環境 || "";
-  const near = vegNear(p.lat, p.lon);
-  const envChips = chipRow(byUse([...near, ...WORDS]), env, (v) => { r.環境 = v; dirty(); });
-  const pl = el("textarea", { rows: 2, placeholder: "見た植物の札を押す。札に無い植物は書く", oninput: (e) => { r.植物 = e.target.value; } }); pl.value = r.植物 || "";
+  const near = vegNear(p.lat, p.lon), sug = [...new Set(near.map(habitatOf).filter(Boolean))];
+  const envChips = chipRow([...sug, ...byUse(HABITATS).filter((h) => !sug.includes(h))], env, (v) => { r.環境 = v; dirty(); });
+  const pl = el("textarea", { rows: 2, placeholder: "周囲で確認した植物の札を押す。札に無い植物は書く", oninput: (e) => { r.植物 = e.target.value; } }); pl.value = r.植物 || "";
   const legend = S.mapdata && vegAt(p.lat, p.lon), lp = legend && (S.mapdata.凡例の植物 || {})[String(legend.凡例コード)];
   const plChips = chipRow(byUse(lp ? lp.植物.map((x) => x[0]) : []), pl, (v) => { r.植物 = v; dirty(); });
   const prev = lastLike(p);
   const same = prev ? el("button", { type: "button", class: "btn sec small", onclick: () => {
     env.value = prev.環境 || ""; pl.value = prev.植物 || ""; r.環境 = env.value; r.植物 = pl.value; dirty(); toast("前回の環境・植物を入れました");
   } }, "前回と同じ") : null;
-  const memo = el("textarea", { rows: 3, placeholder: "メモ", oninput: (e) => { r.メモ = e.target.value; } }); memo.value = r.メモ || "";
+  // メモ（必ず書く欄。祝 2026-10-04）。名詞の札＋動きの札で「イネ科植物でスウィーピング」「セイタカアワダチソウに訪花」と組める
+  const memo = el("textarea", { rows: 3, placeholder: "例 イネ科植物でスウィーピングで捕獲／セイタカアワダチソウに訪花", oninput: (e) => { r.メモ = e.target.value; } }); memo.value = r.メモ || "";
+  const memoAdd = (w, noun) => {
+    let v = memo.value.replace(/\s+$/, "");
+    if (noun && v && !/[、。]$/.test(v)) v += "、";
+    memo.value = v + w; r.メモ = memo.value; dirty();
+    S.usage["メモ:" + w] = (S.usage["メモ:" + w] || 0) + 1; kvSet("usage", S.usage);
+  };
+  const memoUse = (arr) => [...new Set(arr)].sort((a, b) => (S.usage["メモ:" + b] || 0) - (S.usage["メモ:" + a] || 0));
+  const plantNames = [...(r.植物 || "").split(/[、,]/).map((x) => x.trim()).filter(Boolean), ...(lp ? lp.植物.slice(0, 8).map((x) => x[0]) : [])];
+  const memoNouns = el("div", { class: "chips" }, ...memoUse([...MEMO_NOUNS, ...plantNames]).map((w) => el("button", { type: "button", class: "noun", onclick: () => memoAdd(w, true) }, w)));
+  const memoActs = el("div", { class: "chips" }, ...memoUse(MEMO_ACTS).map((w) => el("button", { type: "button", class: "act", onclick: () => memoAdd(w, false) }, w)));
+  // デジカメの画像番号（スマホで撮らないとき）
+  const cam = el("input", { type: "text", value: r.カメラ番号 || "", placeholder: "例 DSC_1234〜1240", oninput: (e) => { r.カメラ番号 = e.target.value; } });
   // 写真
   const th = el("div", { class: "thumbs" });
   const drawThumbs = () => { th.innerHTML = ""; for (const pid of r.photos) thumbImg(pid).then((im) => im && th.append(im)); };
   drawThumbs();
+  // 撮る: 個体・近景・遠景（何度でも）。選ぶ: 端末の写真（種類は下の札で。あとで大きく見て付け替えられる）
+  let kind = r.区分 === "環境" ? "近景" : "個体";
   const file = el("input", { type: "file", accept: "image/*", capture: "environment", multiple: true, style: "display:none" });
   const gal = el("input", { type: "file", accept: "image/*", multiple: true, style: "display:none" });
   gal.onchange = file.onchange = async (e) => {
-    for (const fl of e.target.files) { const pid = await savePhoto(fl); if (pid) { r.photos.push(pid); dirty(); } }
+    for (const fl of e.target.files) { const pid = await savePhoto(fl, kind); if (pid) { r.photos.push(pid); dirty(); } }
     e.target.value = ""; drawThumbs();
   };
+  const shootRow = el("div", { class: "row" },
+    ...PHOTO_KINDS.map((k) => el("button", { type: "button", class: "btn sec", onclick: () => { kind = k; file.click(); } }, "📷 " + k)),
+    el("button", { type: "button", class: "btn sec small", onclick: () => { kind = r.区分 === "環境" ? "近景" : "個体"; gal.click(); } }, "写真を選ぶ"), file, gal);
+  const part = (k, ...xs) => (on(k) ? xs : []);
   f.append(seg, nameBox,
-    el("label", {}, "環境" + (near.length ? `（植生図: ${near.join("・")}）` : "")), el("div", { class: "row" }, same), envChips, env,
-    el("label", {}, "確認された植物" + (lp ? `（${legend.凡例名} の主な植物。調査地点 ${lp.調査地点数}）` : legend ? `（${legend.凡例名}。調査の地点なし）` : "")), plChips, pl,
-    el("label", {}, "メモ"), memo,
-    el("label", {}, "写真"), th,
-    el("div", { class: "row" }, el("button", { type: "button", class: "btn sec", onclick: () => file.click() }, "📷 撮る"),
-      el("button", { type: "button", class: "btn sec", onclick: () => gal.click() }, "写真を選ぶ"), file, gal),
+    ...part("状態", el("label", {}, "確認したもの（いくつでも）"), stageBox),
+    ...part("メモ", el("label", {}, "メモ（確認の状況。札は 名前＋動き で組める）"), memoNouns, memoActs, memo),
+    ...part("環境", el("label", {}, "生息環境" + (near.length ? `（植生図: ${near.join("・")}）` : "")), el("div", { class: "row" }, same), envChips, env),
+    ...part("植物", el("label", {}, "周囲で確認された植物" + (lp ? `（${legend.凡例名} の主な植物。調査地点 ${lp.調査地点数}）` : legend ? `（${legend.凡例名}。調査の地点なし）` : "")), plChips, pl),
+    ...part("写真", el("label", {}, "写真（スマホ）"), th, shootRow),
+    ...part("カメラ", el("label", {}, "デジカメの画像番号"), cam),
     el("div", { class: "row" }, el("button", { type: "submit", class: "btn" }, "OK（保存）"),
       el("button", { type: "button", class: "btn sec", onclick: () => { if (leaveOk()) openPoint(p); } }, "やめる"),
       idx >= 0 ? el("button", { type: "button", class: "btn warn", onclick: () => removeRec(p, idx) }, "この記録を消す") : null));
   $("#panel").append(f);
+  if (preset && preset.和名) { S.dirty = true; return; }
   if (idx < 0 && r.区分 !== "環境") setTimeout(() => q.focus(), 50);
 }
 function methodInput(r) {
-  const opts = ((S.bundle && S.bundle.axes && S.bundle.axes["採集方法"]) || []).concat(METHODS);
+  const opts = [...new Set(((S.bundle && S.bundle.axes && S.bundle.axes["採集方法"]) || []).concat(METHODS))]
+    .sort((a, b) => (S.usage["方法:" + b] || 0) - (S.usage["方法:" + a] || 0));   // よく使うものが上
   const id = "ml" + Math.random().toString(36).slice(2);
   const inp = el("input", { type: "text", list: id, value: r.方法 || "", placeholder: "選ぶか書く", oninput: (e) => { r.方法 = e.target.value; } });
   const dl = el("datalist", { id }); for (const o of [...new Set(opts)]) dl.append(el("option", { value: o }));
@@ -477,21 +566,26 @@ function searchName(raw, ul, pick) {
   if (!list.length) ul.append(el("li", {}, "候補なし（このまま書いた名前で保存できます）"));
   ul.style.display = "block";
 }
-async function savePhoto(file) {
+async function savePhoto(file, kind) {
   try {
     const bmp = await createImageBitmap(file, { imageOrientation: "from-image" });
     const fit = (max) => { const s = Math.min(1, max / Math.max(bmp.width, bmp.height)); const c = document.createElement("canvas"); c.width = Math.round(bmp.width * s); c.height = Math.round(bmp.height * s); c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height); return c; };
     const big = await new Promise((ok) => fit(1600).toBlob(ok, "image/jpeg", 0.85));
     const thumb = fit(200).toDataURL("image/jpeg", 0.7);
-    return await putPhoto({ blob: big, thumb, time: file.lastModified || Date.now(), name: file.name });
+    return await putPhoto({ blob: big, thumb, time: file.lastModified || Date.now(), name: file.name, 種類: kind || "" });
   } catch (e) { toast("写真を読めませんでした: " + (e.message || e)); return null; }
 }
 async function saveForm() {
   const { p, idx, r } = S.editing;
   r.和名 = (r.和名 || "").trim();
-  if (r.区分 !== "環境" && !r.和名) return toast("和名を入れてください（環境の記録なら「環境」を選ぶ）");
+  if ((r.区分 === "重要種" || r.区分 === "確認種") && !r.和名) return toast("和名を入れてください（分からないときは「要確認」、地点・写真だけなら「環境」）");
+  if (r.区分 !== "環境" && !(r.メモ || "").trim() && !confirm("メモが空です。このまま保存しますか？（確認の状況を書いておくと あとで役に立ちます）")) return;
   r.季節 = r.季節 || S.axes["季節"] || ""; r.調査地点 = r.調査地点 || S.axes["地点"] || ""; r.その他 = r.その他 || S.axes["その他"] || "";
   r.time = r.time || Date.now();
+  // 使った回数（札・選ぶ欄の並びに使う）
+  if (r.方法) S.usage["方法:" + r.方法] = (S.usage["方法:" + r.方法] || 0) + 1;
+  for (const s of (r.状態 || "").split("・").filter(Boolean)) S.usage["状態:" + s] = (S.usage["状態:" + s] || 0) + 1;
+  kvSet("usage", S.usage);
   if (idx >= 0) p.recs[idx] = r; else p.recs.push(r);
   await putPoint(p); S.dirty = false; drawPoints(); openPoint(p);
   toast(`地点 ${p.no} に ${r.和名 || "環境"} を保存しました`);
@@ -507,6 +601,12 @@ async function showBig(pid) {
   const url = URL.createObjectURL(ph.blob);
   $("#big-img").src = url; $("#big").style.display = "flex";
   $("#big-del").style.display = S.editing ? "" : "none";
+  // 種類を付け替える（個体・近景・遠景）
+  const kb = $("#big-kind"); kb.innerHTML = "";
+  for (const k of PHOTO_KINDS) kb.append(el("button", { class: "btn small " + (ph.種類 === k ? "" : "sec"), onclick: async () => {
+    ph.種類 = k; await putPhoto(ph); [...kb.children].forEach((b) => b.className = "btn small " + (b.textContent === k ? "" : "sec"));
+    const f = $("#panel form .thumbs") || null; if (f && S.editing) { f.innerHTML = ""; for (const x of S.editing.r.photos) thumbImg(x).then((im) => im && f.append(im)); }
+  } }, k));
   $("#big-close").onclick = () => { $("#big").style.display = "none"; URL.revokeObjectURL(url); };
   $("#big-del").onclick = async () => {
     const r = S.editing.r; r.photos = r.photos.filter((x) => x !== pid); S.dirty = true;
@@ -739,7 +839,7 @@ async function drawFigure(day, focus) {
     let s = text; while (g.measureText(s).width > 400 && s.length > 4) s = s.slice(0, -2) + "…";
     g.fillText(s, FM + 56, ly); ly += 28; return true;
   };
-  for (const k of KUBUN) if (shown.some((p) => p.recs.some((r) => r.区分 === k))) legRow((x, y) => { g.beginPath(); g.arc(x, y, 10, 0, 7); g.fillStyle = KCOLOR[k]; g.fill(); }, k === "環境" ? "環境の記録" : k === "確認種" ? "確認種" : "重要種（番号は地点）");
+  for (const k of KUBUN) if (shown.some((p) => p.recs.some((r) => r.区分 === k))) legRow((x, y) => { g.beginPath(); g.arc(x, y, 10, 0, 7); g.fillStyle = KCOLOR[k]; g.fill(); }, { 環境: "環境の記録", 確認種: "確認種", 要確認: "要確認（持ち帰って調べる）", 重要種: "重要種（番号は地点）" }[k]);
   if (jobPtsDrawn.length) legRow((x, y) => { g.beginPath(); g.arc(x, y, 7, 0, 7); g.fillStyle = "#ffd600"; g.fill(); g.lineWidth = 2; g.strokeStyle = "#333"; g.stroke(); }, "調査地点（トラップ等）");
   for (const [nm, st] of lineLegend) legRow((x, y) => { g.strokeStyle = st.color; g.lineWidth = 4; g.setLineDash(st.dash); g.beginPath(); g.moveTo(x - 14, y); g.lineTo(x + 14, y); g.stroke(); g.setLineDash([]); }, nm);
   if (vegUsed.size) {
@@ -879,23 +979,24 @@ async function exportAll() {
       const phNames = [];
       for (const pid of r.photos || []) {
         const ph = await getPhoto(pid); if (!ph) continue;
-        const nm = `${tag}_${pad(++k)}_${(r.和名 || r.区分 || "地点").replace(/[\\/:*?"<>|]/g, "")}.jpg`;
+        const nm = `${tag}_${pad(++k)}_${(r.和名 || r.区分 || "地点").replace(/[\\/:*?"<>|]/g, "")}${ph.種類 ? "_" + ph.種類 : ""}.jpg`;
         files.push(["写真/" + nm, new Uint8Array(await ph.blob.arrayBuffer())]); phNames.push(nm);
       }
       const rank = marksOf(r.和名).map((m) => m.full).join("、");
-      rows.push([p.day, p.no, r.区分 || "", r.和名 || "", sp ? sp[1] : "", sp ? sp[2] : "", rank, r.個体数 || "", r.方法 || "", r.環境 || "", r.植物 || "", r.メモ || "",
+      rows.push([p.day, p.no, r.区分 || "", r.和名 || "", sp ? sp[1] : "", sp ? sp[2] : "", rank, r.個体数 || "", r.状態 || "", r.方法 || "", r.メモ || "", r.環境 || "", r.植物 || "",
         +p.lat.toFixed(7), +p.lon.toFixed(7), p.acc != null ? p.acc : "", p.how + (p.moved ? "（手で直した）" : ""), hm(new Date(p.time)),
-        r.季節 || "", r.調査地点 || "", p.veg || "", w.範囲 || "", w.近く || "", phNames.join("、")]);
+        r.季節 || "", r.調査地点 || "", p.veg || "", w.範囲 || "", w.近く || "", phNames.join("、"), r.カメラ番号 || "", p.gps番号 || "", p.gps機種 || "", r.数え済み ? "○" : ""]);
       shpRows.push({ lat: p.lat, lon: p.lon, values: { 日: p.day, 地点: p.no, 区分: r.区分 || "", 和名: r.和名 || "", 学名: sp ? sp[1] : "", 科: sp ? sp[2] : "", 重要種: rank,
-        個体数: r.個体数 || "", 方法: r.方法 || "", 環境: r.環境 || "", 植物: r.植物 || "", メモ: r.メモ || "", 誤差: p.acc, 植生: p.veg || "", 範囲: w.範囲 || "", 写真: phNames.join("、") } });
-      if (r.和名 && r.区分 !== "環境") input.push([r.和名, parseInt(r.個体数, 10) || 1, r.方法 || "", r.調査地点 || "", r.その他 || "", r.季節 || "",
-        [r.メモ, `現地記録 地点${p.no}`].filter(Boolean).join(" "), p.day]);
+        個体数: r.個体数 || "", 状態: r.状態 || "", 方法: r.方法 || "", 環境: r.環境 || "", 植物: r.植物 || "", メモ: r.メモ || "", 誤差: p.acc, 植生: p.veg || "", 範囲: w.範囲 || "", 写真: phNames.join("、"),
+        カメラ: r.カメラ番号 || "", GPS番号: p.gps番号 || "", GPS機種: p.gps機種 || "" } });
+      if (r.和名 && (r.区分 === "重要種" || r.区分 === "確認種") && !r.数え済み) input.push([r.和名, parseInt(r.個体数, 10) || 1, r.方法 || "", r.調査地点 || "", r.その他 || "", r.季節 || "",
+        [r.状態, r.メモ, `現地記録 地点${p.no}`].filter(Boolean).join(" "), p.day]);
     }
   }
   gpx += "</gpx>\n";
   const shp = shapefile(shpRows, [["日", "C", 10], ["地点", "N", 4], ["区分", "C", 9], ["和名", "C", 90], ["学名", "C", 90], ["科", "C", 45],
-    ["重要種", "C", 150], ["個体数", "C", 30], ["方法", "C", 45], ["環境", "C", 200], ["植物", "C", 200], ["メモ", "C", 254], ["誤差", "N", 6],
-    ["植生", "C", 90], ["範囲", "C", 60], ["写真", "C", 254]]);
+    ["重要種", "C", 150], ["個体数", "C", 30], ["状態", "C", 60], ["方法", "C", 45], ["環境", "C", 200], ["植物", "C", 200], ["メモ", "C", 254], ["誤差", "N", 6],
+    ["植生", "C", 90], ["範囲", "C", 60], ["写真", "C", 254], ["カメラ", "C", 60], ["GPS番号", "C", 20], ["GPS機種", "C", 40]]);
   for (const [ext, data] of shp) files.push([`シェープファイル/現地記録_地点.${ext}`, data]);
   // 位置図（日ごとの全体図と、地点ごとの拡大図）
   const days = [...new Set(pts.map((p) => p.day))];
@@ -908,14 +1009,15 @@ async function exportAll() {
     }
   }
   files.unshift(
-    ["地点の一覧.xlsx", xlsx("地点の一覧", ["日", "地点", "区分", "和名", "学名", "科", "重要種・外来種", "個体数", "方法", "環境", "確認された植物", "メモ",
-      "緯度", "経度", "誤差m", "位置の取り方", "時刻", "季節", "調査地点", "植生図の凡例", "範囲", "近くの調査地点", "写真"], rows)],
+    ["地点の一覧.xlsx", xlsx("地点の一覧", ["日", "地点", "区分", "和名", "学名", "科", "重要種・外来種", "個体数", "確認したもの", "方法", "メモ", "生息環境", "周囲の植物",
+      "緯度", "経度", "誤差m", "位置の取り方", "時刻", "季節", "調査地点", "植生図の凡例", "範囲", "近くの調査地点", "写真", "デジカメの画像番号", "GPS のプロット番号", "使った GPS", "入力画面で数えた"], rows)],
     ["入力データ.xlsx", xlsx("入力データ", ["和名", "個体数", "採集方法", "地点", "その他", "季節", "備考", "採集日"], input)],
     ["地点.gpx", enc.encode(gpx)],
     ["地点.geojson", enc.encode(JSON.stringify({ type: "FeatureCollection", features: feats }))],
     ["説明.txt", enc.encode([`現地記録の書き出し（${job}、${new Date().toLocaleString()}）`,
       "地点の一覧.xlsx … 記録ごとの行（位置・植生図の凡例・範囲の中か外か・写真の名前）",
-      "入力データ.xlsx … 業務の 入力 フォルダに置くと 1_入力データをまとめる で集計に入る（7 列＋採集日。重要種・確認種の記録）",
+      "入力データ.xlsx … 業務の 入力 フォルダに置くと 1_入力データをまとめる で集計に入る（7 列＋採集日。重要種・確認種の記録。",
+      "                 種名の入力画面で数えた記録（📍から来た・地点の一覧の「入力画面で数えた」○）は二重にならないよう入れていない）",
       "シェープファイル … 現地記録_地点（点。WGS84。日本語は UTF-8、.cpg 付き。QGIS・ArcGIS で開ける）",
       "地点.gpx … ガーミンなどに入れられる。地点.geojson … QGIS などで開ける",
       "位置図 … A4 縦（150 dpi）。日ごとの全体図と、地点ごとの拡大図（写真と同じ 日付_地点 の名前）",
@@ -935,6 +1037,19 @@ async function exportAll() {
 function pickMap(fromBundle, fromFile) {
   if (fromBundle && fromFile) return (fromFile.作成 || "") > (fromBundle.作成 || "") && fromFile.業務 === fromBundle.業務 ? fromFile : fromBundle;
   return fromBundle || fromFile || null;
+}
+// 入力欄に出す項目（業務ごと。発注者・調査項目で記入する欄が変わる。祝 2026-10-04）
+// 地図・写真・和名・個体数は いつも出す（祝 2026-10-04「固定でもよい」）。ここに無い項目は選べない
+const FIELDS = [["方法", "方法"], ["状態", "確認したもの（成虫・幼虫・足跡 など）"], ["メモ", "メモ"], ["環境", "生息環境"],
+  ["植物", "周囲で確認された植物"], ["カメラ", "デジカメの画像番号"], ["GPS", "GPS のプロット番号・使った GPS"], ["数え済み", "入力画面で数えた（印）"]];
+const FIXED = new Set(["個体数", "写真"]);
+function fieldsForm() {
+  const box = $("#fields-box"); box.innerHTML = "";
+  for (const [k, label] of FIELDS) {
+    const cb = el("input", { type: "checkbox", onchange: async () => { S.fields[k] = cb.checked; await kvSet("fields:" + jobName(), S.fields); if (S.cur && !S.editing) openPoint(S.cur); } });
+    cb.checked = S.fields[k] !== false;
+    box.append(el("label", { class: "chk" }, cb, " " + label));
+  }
 }
 function figForm() {
   const f = S.fig;
@@ -958,6 +1073,8 @@ async function boot() {
   } else { S.olds = []; toast("種名の入力画面で 業務ファイル を読み込むと、和名を索引から選べます", 4000); }
   S.usage = (await kvGet("usage")) || {};
   S.fig = { ...FIG_DEF, ...((await kvGet("fig")) || {}) };
+  S.gpsModel = (await kvGet("gpsModel")) || "";
+  S.fields = (await kvGet("fields:" + jobName())) || {};
   S.points = (await allPoints()) || [];
   applyMapdata(pickMap(S.bundle && S.bundle.genchiMap, await kvGet("mapdata")));
   drawPoints();
@@ -966,6 +1083,16 @@ async function boot() {
   if (view && view.業務 === jobName()) map.setView([view.lat, view.lon], view.z); else fitJob();
   map.on("moveend", () => { const c = map.getCenter(); kvSet("view", { 業務: jobName(), lat: c.lat, lon: c.lng, z: map.getZoom() }); });
   $("#go-input").onclick = (e) => { if (!leaveOk()) e.preventDefault(); };
+  // 種名の入力画面の 📍 から: その場で地点を測り、和名と区分を入れた入力欄を開く（入力画面で数えた印つき）
+  if (location.hash === "#list") { history.replaceState(null, "", location.pathname); showTab("list"); }
+  const qs = new URL(location.href).searchParams, add = qs.get("add");
+  if (add) {
+    history.replaceState(null, "", location.pathname);       // 読み直しで二度足さない
+    const ms = marksOf(add);
+    const kubun = ms.some((m) => !m.alien) ? "重要種" : "確認種";
+    toast(`${add} の地点を測っています…`);
+    await newPoint({ 和名: add, 区分: kubun, 数え済み: qs.get("from") === "input" });
+  }
   window.addEventListener("beforeunload", (e) => { if (S.dirty) { e.preventDefault(); e.returnValue = ""; } });
   $("#btn-here").onclick = () => newPoint();
   $("#tab-map").onclick = () => showTab("map");
@@ -974,7 +1101,7 @@ async function boot() {
     const n = S.points.length, r = S.points.reduce((a, p) => a + p.recs.length, 0);
     $("#rec-info").textContent = `地点 ${n}・記録 ${r}（端末の中）`;
     $("#ver").textContent = `現地記録 ${GENCHI_VERSION}（試作品）　業務ファイル: ${S.bundle ? S.bundle.case : "なし"}${S.bundle && S.bundle.genchiMap ? "（地図入り）" : ""}`;
-    figForm();
+    figForm(); fieldsForm();
     $("#dlg-menu").showModal();
   };
   $("#btn-close-menu").onclick = () => $("#dlg-menu").close();

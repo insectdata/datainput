@@ -17,6 +17,11 @@ header{position:fixed;top:0;left:0;right:0;z-index:1000;background:var(--accent)
 header h1{font-size:15px;margin:0;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 header button,header a{background:rgba(255,255,255,.15);color:#fff;border:1px solid rgba(255,255,255,.4);border-radius:6px;padding:2px 10px;text-decoration:none;font-size:14px}
 header button.on{background:#fff;color:var(--accent)}
+/* 入力｜地図｜一覧 のタブ（入力画面と同じ形。祝 2026-10-04） */
+header .tabs{display:flex;gap:0;border:1px solid rgba(255,255,255,.6);border-radius:7px;overflow:hidden}
+header .tabs a,header .tabs button{border:0;border-radius:0;border-left:1px solid rgba(255,255,255,.4);padding:3px 12px;font-size:15px;background:rgba(255,255,255,.12);color:#fff}
+header .tabs :first-child{border-left:0}
+header .tabs .on{background:#fff;color:var(--accent);font-weight:700}
 #map{position:fixed;top:calc(36px + env(safe-area-inset-top));left:0;right:0;bottom:0}
 #list{position:fixed;top:calc(36px + env(safe-area-inset-top));left:0;right:0;bottom:0;overflow-y:auto;background:var(--bg);padding:4px;display:none}
 .fab{position:fixed;z-index:900;border:0;border-radius:999px;box-shadow:0 2px 6px rgba(0,0,0,.3);font-weight:700}
@@ -37,9 +42,11 @@ header button.on{background:#fff;color:var(--accent)}
 .recs li{border:1px solid var(--line);border-radius:6px;padding:4px 6px;margin:3px 0;display:flex;gap:6px;align-items:center}
 .recs li .t{flex:1}
 .kb{display:inline-block;font-size:11px;border-radius:4px;padding:0 5px;color:#fff;margin-right:4px;vertical-align:middle}
-.kb.重要種{background:var(--rdb)}.kb.確認種{background:var(--sp)}.kb.環境{background:var(--env)}
+.kb.重要種{background:var(--rdb)}.kb.確認種{background:var(--sp)}.kb.環境{background:var(--env)}.kb.要確認{background:#ef6c00}
 .thumbs{display:flex;gap:4px;flex-wrap:wrap}
 .thumbs img{width:56px;height:56px;object-fit:cover;border-radius:4px;border:1px solid var(--line)}
+.thumbs .th{position:relative;display:inline-block}
+.thumbs .th b{position:absolute;left:1px;bottom:1px;background:rgba(0,0,0,.6);color:#fff;font-size:10px;padding:0 3px;border-radius:3px}
 form{border-top:1px dashed var(--line);margin-top:6px;padding-top:4px}
 label{font-size:12px;color:var(--muted);display:block;margin-top:4px}
 input[type=text],input[type=search],select,textarea{width:100%;padding:4px 8px;border:1px solid var(--line);border-radius:6px;font-size:16px;background:#fff}
@@ -47,9 +54,12 @@ textarea{min-height:4.5em;line-height:1.3;resize:vertical}
 .seg{display:flex;gap:0}
 .seg button{flex:1;border:1px solid var(--line);background:#fff;padding:6px 0;font-weight:600}
 .seg button:first-child{border-radius:6px 0 0 6px}.seg button:last-child{border-radius:0 6px 6px 0}
-.seg button.on.重要種{background:var(--rdb);color:#fff}.seg button.on.確認種{background:var(--sp);color:#fff}.seg button.on.環境{background:var(--env);color:#fff}
+.seg button.on.重要種{background:var(--rdb);color:#fff}.seg button.on.要確認{background:#ef6c00;color:#fff}.seg button.on.確認種{background:var(--sp);color:#fff}.seg button.on.環境{background:var(--env);color:#fff}
 .chips{display:flex;flex-wrap:wrap;gap:4px;margin:3px 0}
 .chips button{border:1px solid var(--line);background:var(--soft);border-radius:999px;padding:2px 9px;font-size:13px}
+.chips button.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+.chips button.noun{background:#eef6ea}
+.chips button.act{background:#fff4e0}
 .hits{list-style:none;margin:2px 0;padding:0;border:1px solid var(--line);border-radius:6px;max-height:34vh;overflow-y:auto}
 .hits li{padding:4px 8px;border-bottom:1px solid var(--line)}
 .hits li small{color:var(--muted);font-size:12px;margin-left:6px}
@@ -76,14 +86,15 @@ small.hint{color:var(--muted);font-size:12px}
 #dlg-fig img{width:100%;border:1px solid var(--line)}
 dialog .grid{display:grid;grid-template-columns:auto 1fr;gap:4px 8px;align-items:center;font-size:14px}
 dialog .grid label{margin:0}
+dialog .fields{display:grid;grid-template-columns:1fr 1fr;gap:2px 8px}
+dialog label.chk{display:flex;align-items:center;gap:6px;color:var(--ink);font-size:14px;margin:0}
+dialog label.chk input{width:20px;height:20px;margin:0}
 </style>
 </head>
 <body>
 <header>
   <h1 id="title">現地記録</h1>
-  <a id="go-input" href="./index.html" title="種名の入力画面（個体数を数える方）へ">入力</a>
-  <button id="tab-map" class="on">地図</button>
-  <button id="tab-list">一覧</button>
+  <nav class="tabs"><a id="go-input" href="./index.html" title="種名の入力画面（個体数を数える方）へ">入力</a><button id="tab-map" class="on">地図</button><button id="tab-list">一覧</button></nav>
   <button id="btn-menu" aria-label="メニュー">☰</button>
 </header>
 
@@ -111,6 +122,9 @@ dialog .grid label{margin:0}
   <input type="file" id="file-map" accept=".json,application/json">
   <button class="btn sec" id="btn-cache">この範囲の地図を端末に貯める（圏外用）</button>
   <small class="hint" id="cache-info">電波のある所で一度押してください。地理院の標準地図と航空写真を、範囲の分だけ貯めます。</small>
+  <h4>入力欄に出す項目（この業務）</h4>
+  <div id="fields-box" class="fields"></div>
+  <small class="hint">発注者・調査項目で記入する欄が変わるときに、要らない欄を外します。地図・区分・和名・個体数・写真はいつも出ます。書き出しの列は変わりません。</small>
   <h4>位置図（A4 縦）</h4>
   <div class="grid">
     <label>図の名前</label><input type="text" id="fig-title">
@@ -139,7 +153,7 @@ dialog .grid label{margin:0}
   <img id="fig-img" alt="位置図">
   <small class="hint">書き出し（☰ すべて書き出す）で PNG として zip に入ります。</small>
 </dialog>
-<div id="big"><img id="big-img" alt=""><div class="row"><button class="btn warn" id="big-del">この写真を外す</button><button class="btn sec" id="big-close">閉じる</button></div></div>
+<div id="big"><img id="big-img" alt=""><div class="row" id="big-kind"></div><div class="row"><button class="btn warn" id="big-del">この写真を外す</button><button class="btn sec" id="big-close">閉じる</button></div></div>
 <div class="toast" id="toast"></div>
 <script src="./lib/leaflet/leaflet.js"></script>
 <script src="./genchi.js"></script>

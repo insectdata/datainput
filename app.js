@@ -7,7 +7,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "v31";   // 画面の版（sw.js の VERSION と合わせる。☰ に出す）
+const APP_VERSION = "v33";   // 画面の版（sw.js の VERSION と合わせる。☰ に出す）
 const AXES = ["季節", "採集方法", "地点", "その他"];
 const COLS = ["和名", "個体数", "採集方法", "地点", "その他", "季節", "備考", "採集日"];
 const $ = (s) => document.querySelector(s);
@@ -21,7 +21,7 @@ const el = (t, attrs = {}, ...kids) => {
 };
 
 // ---------------------------------------------------------------- IndexedDB
-const DB = { name: "konchu-input", ver: 1, db: null };
+const DB = { name: "konchu-input", ver: 2, db: null };   // 2: 入れ物が欠けていたら作り直す（現地記録の画面が先に空で作った端末のため）
 function openDB() {
   return new Promise((ok, ng) => {
     const r = indexedDB.open(DB.name, DB.ver);
@@ -352,7 +352,7 @@ async function addSpecies(sp) {
       created: Date.now(), updated: Date.now(), exported: 0 };
     rec.id = await putRecord(rec);
     S.records.push(rec);
-    toast(`${sp[0]} を追加`);
+    toast(shortMarks(sp) ? `${sp[0]} を追加（重要種など。📍で地図に記録できます）` : `${sp[0]} を追加`);
   }
   $("#q").value = "";
   $("#hits").hidden = true;
@@ -387,7 +387,12 @@ function renderList() {
     const memo = el("td", { class: "memo" }, el("input", { type: "text", value: r.備考 || "", placeholder: "メモ",
       onchange: (e) => setNote(r, e.target.value), onkeydown: (e) => { if (e.key === "Enter") e.target.blur(); } }));
     const ms = shortMarks(S.byName && S.byName.get(r.和名));
-    if (ms) name.insertBefore(ms, name.lastChild);
+    // 📍 で現地記録へ（地点を測って詳しく。入力画面で数えた印を付けて二重に数えない。祝 2026-10-04）
+    // 重要種・外来種は「📍地図に記録」、ほかの種も 📍 だけ出す（重要種かもしれない・持ち帰って調べる種も地図に残せるように）
+    const pin = el("a", { class: "pin", href: `./genchi.html?add=${encodeURIComponent(r.和名)}&from=input`, title: "現地記録で地点・写真・環境を記録する",
+      onclick: (e) => e.stopPropagation() }, ms ? "📍地図に記録" : "📍");
+    if (ms) { name.insertBefore(ms, name.lastChild); ms.append(pin); }
+    else name.insertBefore(pin, name.lastChild);          // 印の無い種は名前のすぐ右に（行を高くしない）
     if (r.exported) name.insertBefore(el("span", { class: "pill", title: "書き出し済み。変えると未書き出しに戻ります" }, "済"), name.lastChild);
     // ゴミ箱は置かない（誤タップで消えるのを避ける）。消したいときは − で 0 にする。0 の記録は Excel に出ない
     tb.append(el("tr", { class: (parseInt(r.個体数, 10) || 0) > 0 ? "" : "zero" }, name, memo, el("td", { class: "num" }, ctr)));
