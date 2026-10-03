@@ -21,7 +21,7 @@ button,input,select{font:inherit}
 header{position:sticky;top:0;z-index:5;background:var(--accent);color:var(--accent-ink);padding:calc(2px + env(safe-area-inset-top)) 8px 2px;display:flex;align-items:center;gap:8px}
 header h1{font-size:15px;margin:0;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 header .count{font-size:13px;opacity:.9;white-space:nowrap}
-header button{background:rgba(255,255,255,.15);color:#fff;border:1px solid rgba(255,255,255,.4);border-radius:6px;padding:1px 10px}
+header button,header a{background:rgba(255,255,255,.15);color:#fff;border:1px solid rgba(255,255,255,.4);border-radius:6px;padding:1px 10px;text-decoration:none;font-size:15px}
 main{padding:2px;max-width:760px;margin:0 auto}
 section{background:var(--paper);border:1px solid var(--line);border-radius:var(--radius);padding:2px 4px;margin-bottom:2px}
 .axes{display:grid;grid-template-columns:1fr 1fr;gap:2px 4px}
@@ -118,6 +118,7 @@ th.memo,td.memo{display:none}
 <header>
   <h1 id="title">昆虫調査 入力</h1>
   <span class="count" id="pending"></span>
+  <a id="go-genchi" href="./genchi.html" title="現地記録（重要種・環境の地点・写真・地図）へ">地図</a>
   <button id="btn-menu" aria-label="メニュー">☰</button>
 </header>
 
@@ -175,6 +176,11 @@ th.memo,td.memo{display:none}
     <label>書き出した Excel を読み込んで続きを入力する</label>
     <input type="file" id="file-import" accept=".xlsx">
     <small class="hint">端末に無い記録は足し、同じ記録（種名・季節・方法・地点・その他・採集日が同じ）はファイルの値で上書きします。読み込んだ分は書き出し済みの扱い</small>
+  </div>
+  <h4>現地記録</h4>
+  <div class="row">
+    <a class="btn sec" href="./genchi.html" style="text-align:center;text-decoration:none">現地記録（重要種・環境の地点・写真・地図）へ</a>
+    <small class="hint">試しの版。この画面で読み込んだ業務ファイルの和名を使います</small>
   </div>
   <h4>業務</h4>
   <div class="row">

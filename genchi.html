@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#2f5d3a">
+<title>現地記録</title>
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="icon" href="./icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="./lib/leaflet/leaflet.css">
+<style>
+:root{--bg:#f6f7f4;--paper:#fff;--ink:#1f2a22;--muted:#6b7570;--line:#d9dfd9;--accent:#2f5d3a;--soft:#e8efe9;--warn:#b4541f;--rdb:#c62828;--env:#2e7d32;--sp:#1565c0}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font:16px/1.2 system-ui,-apple-system,"Segoe UI","Hiragino Sans","Yu Gothic UI",sans-serif}
+button,input,select,textarea{font:inherit}
+header{position:fixed;top:0;left:0;right:0;z-index:1000;background:var(--accent);color:#fff;padding:calc(2px + env(safe-area-inset-top)) 6px 2px;display:flex;align-items:center;gap:6px;height:calc(36px + env(safe-area-inset-top))}
+header h1{font-size:15px;margin:0;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+header button,header a{background:rgba(255,255,255,.15);color:#fff;border:1px solid rgba(255,255,255,.4);border-radius:6px;padding:2px 10px;text-decoration:none;font-size:14px}
+header button.on{background:#fff;color:var(--accent)}
+#map{position:fixed;top:calc(36px + env(safe-area-inset-top));left:0;right:0;bottom:0}
+#list{position:fixed;top:calc(36px + env(safe-area-inset-top));left:0;right:0;bottom:0;overflow-y:auto;background:var(--bg);padding:4px;display:none}
+.fab{position:fixed;z-index:900;border:0;border-radius:999px;box-shadow:0 2px 6px rgba(0,0,0,.3);font-weight:700}
+#btn-here{left:50%;transform:translateX(-50%);bottom:calc(14px + env(safe-area-inset-bottom));background:var(--warn);color:#fff;padding:12px 24px;font-size:18px}
+.tools{position:fixed;z-index:900;right:8px;top:calc(46px + env(safe-area-inset-top));display:flex;flex-direction:column;gap:6px}
+.tools button{border:1px solid var(--line);background:#fff;border-radius:8px;padding:4px 8px;font-size:13px;box-shadow:0 1px 3px rgba(0,0,0,.2)}
+.tools button.on{background:var(--accent);color:#fff}
+#panel{position:fixed;z-index:1001;left:0;right:0;bottom:0;max-height:72vh;overflow-y:auto;background:var(--paper);border-top:2px solid var(--accent);border-radius:12px 12px 0 0;box-shadow:0 -2px 10px rgba(0,0,0,.25);padding:6px 8px calc(8px + env(safe-area-inset-bottom));display:none}
+#panel h3{margin:0;font-size:16px;display:flex;align-items:center;gap:6px}
+#panel h3 .x{margin-left:auto;border:0;background:none;font-size:22px;color:var(--muted)}
+.meta{font-size:12px;color:var(--muted);margin:2px 0}
+.row{display:flex;gap:6px;flex-wrap:wrap;margin:4px 0}
+.btn{border:1px solid var(--accent);background:var(--accent);color:#fff;border-radius:6px;padding:5px 12px;font-weight:600}
+.btn.sec{background:#fff;color:var(--accent)}
+.btn.warn{background:#fff;color:var(--warn);border-color:var(--warn)}
+.btn.small{padding:2px 8px;font-size:13px;font-weight:400}
+.recs{list-style:none;margin:4px 0;padding:0}
+.recs li{border:1px solid var(--line);border-radius:6px;padding:4px 6px;margin:3px 0;display:flex;gap:6px;align-items:center}
+.recs li .t{flex:1}
+.kb{display:inline-block;font-size:11px;border-radius:4px;padding:0 5px;color:#fff;margin-right:4px;vertical-align:middle}
+.kb.重要種{background:var(--rdb)}.kb.確認種{background:var(--sp)}.kb.環境{background:var(--env)}
+.thumbs{display:flex;gap:4px;flex-wrap:wrap}
+.thumbs img{width:56px;height:56px;object-fit:cover;border-radius:4px;border:1px solid var(--line)}
+form{border-top:1px dashed var(--line);margin-top:6px;padding-top:4px}
+label{font-size:12px;color:var(--muted);display:block;margin-top:4px}
+input[type=text],input[type=search],select,textarea{width:100%;padding:4px 8px;border:1px solid var(--line);border-radius:6px;font-size:16px;background:#fff}
+textarea{min-height:4.5em;line-height:1.3;resize:vertical}
+.seg{display:flex;gap:0}
+.seg button{flex:1;border:1px solid var(--line);background:#fff;padding:6px 0;font-weight:600}
+.seg button:first-child{border-radius:6px 0 0 6px}.seg button:last-child{border-radius:0 6px 6px 0}
+.seg button.on.重要種{background:var(--rdb);color:#fff}.seg button.on.確認種{background:var(--sp);color:#fff}.seg button.on.環境{background:var(--env);color:#fff}
+.chips{display:flex;flex-wrap:wrap;gap:4px;margin:3px 0}
+.chips button{border:1px solid var(--line);background:var(--soft);border-radius:999px;padding:2px 9px;font-size:13px}
+.hits{list-style:none;margin:2px 0;padding:0;border:1px solid var(--line);border-radius:6px;max-height:34vh;overflow-y:auto}
+.hits li{padding:4px 8px;border-bottom:1px solid var(--line)}
+.hits li small{color:var(--muted);font-size:12px;margin-left:6px}
+.tag{display:inline-block;font-size:11px;border-radius:4px;padding:0 4px;margin-left:4px;font-weight:600;background:#fde8e8;color:#b3261e;border:1px solid #f2b8b5}
+.tag.alien{background:#fff4c2;color:#7a5a00;border-color:#e8d27a}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.pt{background:var(--paper);border:1px solid var(--line);border-radius:6px;padding:4px 6px;margin-bottom:4px;display:flex;gap:6px}
+.pt img{width:64px;height:64px;object-fit:cover;border-radius:4px}
+.pt .t{flex:1;font-size:14px}
+.pt .t b{font-size:15px}
+.num{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:999px;color:#fff;font-size:12px;font-weight:700;border:2px solid #fff;box-shadow:0 0 2px rgba(0,0,0,.6)}
+.lbl{background:rgba(255,255,255,.85);border:0;box-shadow:none;font-size:12px;padding:0 3px;font-weight:600}
+.toast{position:fixed;z-index:2000;left:50%;top:calc(44px + env(safe-area-inset-top));transform:translateX(-50%);background:var(--ink);color:#fff;padding:5px 14px;border-radius:999px;font-size:14px;opacity:0;transition:opacity .2s;pointer-events:none;max-width:92vw;text-align:center}
+.toast.on{opacity:.95}
+dialog{border:1px solid var(--line);border-radius:8px;max-width:94vw;width:440px;max-height:88vh;overflow-y:auto;padding:8px}
+dialog h4{margin:10px 0 3px;font-size:12px;color:var(--muted);border-bottom:1px solid var(--line)}
+dialog .btn{width:100%;margin:3px 0}
+small.hint{color:var(--muted);font-size:12px}
+#big{position:fixed;inset:0;z-index:3000;background:rgba(0,0,0,.9);display:none;align-items:center;justify-content:center;flex-direction:column;gap:8px}
+#big img{max-width:96vw;max-height:80vh}
+.leaflet-control-attribution{font-size:10px}
+#here-info{position:fixed;z-index:900;left:8px;right:90px;top:calc(46px + env(safe-area-inset-top));margin-left:44px;background:rgba(255,255,255,.92);border-radius:6px;padding:2px 8px;font-size:13px;display:none;box-shadow:0 1px 3px rgba(0,0,0,.2)}
+#dlg-fig{width:96vw;max-width:900px}
+#dlg-fig img{width:100%;border:1px solid var(--line)}
+dialog .grid{display:grid;grid-template-columns:auto 1fr;gap:4px 8px;align-items:center;font-size:14px}
+dialog .grid label{margin:0}
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title">現地記録</h1>
+  <a id="go-input" href="./index.html" title="種名の入力画面（個体数を数える方）へ">入力</a>
+  <button id="tab-map" class="on">地図</button>
+  <button id="tab-list">一覧</button>
+  <button id="btn-menu" aria-label="メニュー">☰</button>
+</header>
+
+<div id="map"></div>
+<div class="tools" id="tools">
+  <button id="t-layer">写真</button>
+  <button id="t-veg" class="on">植生</button>
+  <button id="t-gps">現在地</button>
+  <button id="t-fit">範囲</button>
+  <button id="t-day">今日だけ</button>
+</div>
+<div id="here-info"></div>
+<button class="fab" id="btn-here">ここを記録</button>
+
+<div id="list"></div>
+
+<div id="panel"></div>
+
+<dialog id="dlg-menu">
+  <h3 style="margin:0">設定</h3>
+  <h4>業務の地図</h4>
+  <div id="map-info" style="font-size:14px"></div>
+  <small class="hint">ふだんは 業務ファイル（スマホ用.json）に入っています（PC の業務フォルダに「地図」フォルダを作り、GPX・KML を置いてからスマホ用ファイルを作る）。</small>
+  <label>別に作った地図（○○_現地記録用の地図.json）を読み込む</label>
+  <input type="file" id="file-map" accept=".json,application/json">
+  <button class="btn sec" id="btn-cache">この範囲の地図を端末に貯める（圏外用）</button>
+  <small class="hint" id="cache-info">電波のある所で一度押してください。地理院の標準地図と航空写真を、範囲の分だけ貯めます。</small>
+  <h4>位置図（A4 縦）</h4>
+  <div class="grid">
+    <label>図の名前</label><input type="text" id="fig-title">
+    <label>項目</label><input type="text" id="fig-koumoku" placeholder="陸上昆虫類・両生類爬虫類哺乳類 など">
+    <label>背景</label><select id="fig-bg"><option>標準地図</option><option>航空写真</option></select>
+    <label>植生図</label><label style="color:var(--ink)"><input type="checkbox" id="fig-veg"> 重ねる</label>
+    <label>拡大図</label><label style="color:var(--ink)"><input type="checkbox" id="fig-zoom"> 地点ごとの拡大図も書き出す</label>
+    <label>見る日</label><select id="fig-day"></select>
+  </div>
+  <button class="btn sec" id="btn-fig">位置図を見る（全体図）</button>
+  <small class="hint">表題は 業務名・図の名前・季節・項目・調査日。名前が重なるときはずらして引き出し線で結びます。季節は記録の季節（種名の入力画面で選んだ値）から。</small>
+  <h4>記録</h4>
+  <div id="rec-info" style="font-size:14px"></div>
+  <button class="btn" id="btn-export">すべて書き出す（Excel・写真・シェープ・GPX・位置図）</button>
+  <small class="hint">zip 1 つにして共有します（Google ドライブなどへ）。中身: 地点の一覧.xlsx・入力データ.xlsx（集計の 7 列）・シェープファイル・地点.gpx（ガーミン用）・地点.geojson・写真・位置図</small>
+  <button class="btn warn" id="btn-clear">今日より前の地点を端末から消す</button>
+  <small class="hint">書き出したあとに、スマホの容量をあけるため。今日の地点は残ります。</small>
+  <h4>ほか</h4>
+  <a class="btn sec" href="./index.html" style="display:block;text-align:center;text-decoration:none;box-sizing:border-box">種名の入力画面へ</a>
+  <small class="hint" id="ver"></small>
+  <button class="btn sec" id="btn-close-menu">閉じる</button>
+</dialog>
+
+<dialog id="dlg-fig">
+  <div class="row" style="justify-content:space-between;align-items:center"><b id="fig-name"></b><button class="btn sec small" id="fig-close">閉じる</button></div>
+  <img id="fig-img" alt="位置図">
+  <small class="hint">書き出し（☰ すべて書き出す）で PNG として zip に入ります。</small>
+</dialog>
+<div id="big"><img id="big-img" alt=""><div class="row"><button class="btn warn" id="big-del">この写真を外す</button><button class="btn sec" id="big-close">閉じる</button></div></div>
+<div class="toast" id="toast"></div>
+<script src="./lib/leaflet/leaflet.js"></script>
+<script src="./genchi.js"></script>
+</body>
+</html>
