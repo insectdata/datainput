@@ -7,7 +7,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "v28";   // 画面の版（sw.js の VERSION と合わせる。☰ に出す）
+const APP_VERSION = "v29";   // 画面の版（sw.js の VERSION と合わせる。☰ に出す）
 const AXES = ["季節", "採集方法", "地点", "その他"];
 const COLS = ["和名", "個体数", "採集方法", "地点", "その他", "季節", "備考", "採集日"];
 const $ = (s) => document.querySelector(s);
@@ -104,6 +104,7 @@ async function applyBundle(b) {
   S.oldNames = new Map();                          // 和名 → その種の旧名（候補の行に「旧名: …」を短く出す）
   for (const o of S.olds) for (const i of o.t) {
     const w = (b.species[i] || [])[0]; if (!w) continue;
+    if (!/[\u3040-\u30ff\u4e00-\u9fff]/.test(o.n)) continue;   // 「旧名: …」には和名の旧名だけ（古い学名は打って当たったときだけ。祝 2026-10-04）
     if (!S.oldNames.has(w)) S.oldNames.set(w, []);
     S.oldNames.get(w).push(o.n + (o.f ? "※" : ""));
   }
