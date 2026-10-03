@@ -29,8 +29,8 @@ section{background:var(--paper);border:1px solid var(--line);border-radius:var(-
 .axes select,.axes input{padding:1px 6px;border:1px solid var(--line);border-radius:6px;background:#fff;font-size:16px;min-height:28px}
 .axes select:disabled{background:var(--soft);color:var(--muted)}
 .search{position:relative}
-.search input{width:100%;padding:2px 36px 2px 8px;border:1px solid var(--line);border-radius:6px;font-size:19px;font-weight:600;min-height:36px}
-.search .clear{position:absolute;right:2px;top:2px;height:32px;width:32px;border:0;background:transparent;color:var(--muted);font-size:20px}
+.search input{width:100%;padding:4px 40px 4px 8px;border:1px solid var(--line);border-radius:6px;font-size:19px;font-weight:600;min-height:40px}
+.search .clear{position:absolute;right:2px;top:4px;height:32px;width:34px;border:0;background:transparent;color:var(--muted);font-size:20px}
 .hits{list-style:none;margin:2px 0 0;padding:0;border:1px solid var(--line);border-radius:8px;overflow:hidden;max-height:46vh;overflow-y:auto}
 .hits li{padding:2px 8px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:8px;align-items:baseline}
 .hits li:last-child{border-bottom:0}
@@ -76,6 +76,7 @@ td .note{width:100%;border:0;border-bottom:1px dashed var(--line);padding:4px 0;
 .hits .sub .note{color:#1a4d99}
 .tag.old{background:#eef6ea;color:#2f6b1f;border:1px solid #a9d09b}
 .hits .sub .old{color:#2f6b1f;white-space:normal}
+.hits .sub .old.hit{font-weight:bold}
 dialog.pick .note{font-size:13px;line-height:1.1;margin:2px 0 4px}
 dialog.pick .cands{list-style:none;margin:0;padding:0}
 dialog.pick .cands li{border:1px solid var(--line);border-radius:6px;padding:3px 8px;margin:3px 0;cursor:pointer}

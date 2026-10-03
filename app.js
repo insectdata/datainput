@@ -7,7 +7,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "v24";   // 画面の版（sw.js の VERSION と合わせる。☰ に出す）
+const APP_VERSION = "v28";   // 画面の版（sw.js の VERSION と合わせる。☰ に出す）
 const AXES = ["季節", "採集方法", "地点", "その他"];
 const COLS = ["和名", "個体数", "採集方法", "地点", "その他", "季節", "備考", "採集日"];
 const $ = (s) => document.querySelector(s);
@@ -236,23 +236,27 @@ function search() {
   const list = rank(pre).slice(0, 40);
   if (list.length < 40) list.push(...rank(mid).slice(0, 40 - list.length));
   list.push(...rank(sci).slice(0, 10));
-  // 旧名で探す（先頭一致。2 字から）: 打った旧名の今の種を 候補の後ろに出す
-  const oldHits = [];
+  // 旧名で探す（先頭一致。2 字から）。打った旧名の今の種は 1 行にまとめ、右下に「旧名 ○○」（祝 2026-10-04）。
+  // 今の名で出ている種ならその行に、出ていなければ候補の後ろに 1 行だけ足す（同じ和名を何行も並べない）
+  const oldOf = new Map();                         // species の行 → 打った旧名に当たった旧名の一覧
   if (q.length >= 2) {
     for (const o of S.olds) {
       if (!o.k.startsWith(q)) continue;
       for (const i of o.t) {
         const sp = S.bundle.species[i];
-        if (sp && (sp[4] & S.masterBit)) oldHits.push([sp, o]);
+        if (!sp || !(sp[4] & S.masterBit)) continue;
+        if (!oldOf.has(sp)) oldOf.set(sp, []);
+        if (oldOf.get(sp).length < 3) oldOf.get(sp).push(o);
       }
-      if (oldHits.length >= 12) break;
+      if (oldOf.size >= 12) break;
     }
   }
-  if (!list.length && !oldHits.length) {
+  const extra = [...oldOf.keys()].filter((sp) => !list.includes(sp));
+  if (!list.length && !extra.length) {
     hits.append(el("li", { class: "none" }, "候補がありません。綴りを変えるか、設定でマスタを切り替えてください"));
   }
   const picks = S.bundle.picks || {}, dist = S.bundle.dist || {}, notes = S.bundle.notes || {};
-  for (const sp of list) {
+  for (const sp of [...list, ...extra]) {
     const exact = sp[5] === q, n = used(sp);
     const ja = el("span", { class: "ja" + (exact ? " exact" : "") }, sp[0]);
     ja.append(...marks(sp));
@@ -263,15 +267,14 @@ function search() {
     if (dist[sp[0]]) sub.append(el("span", { class: "dist" }, `分布: ${dist[sp[0]]}`));
     // 工房の注記（目録のみ・水国のみ・和名同・学名異 など）。シノニムに気付く手がかり（2026-09-27）
     if (notes[sp[0]]) sub.append(el("span", { class: "dist note" }, notes[sp[0]]));
-    const on = S.oldNames.get(sp[0]);
-    if (on) sub.append(el("span", { class: "dist old" }, "旧名: " + on.slice(0, 3).join("、") + (on.length > 3 ? " ほか" : "")));
-    hits.append(el("li", { onclick: () => (picks[sp[0]] ? openPick(sp) : addSpecies(sp)) }, ja, sub));
-  }
-  for (const [sp, o] of oldHits) {
-    const ja = el("span", { class: "ja" }, sp[0]);
-    ja.append(...marks(sp), el("span", { class: "tag old", title: "打った名前は この種の旧名（シノニム）" }, "旧名"));
-    const sub = el("span", { class: "sub" }, `${sp[2] || ""}　${sp[1] || ""}`);
-    sub.append(el("span", { class: "dist old" }, `旧名「${o.n}」` + (o.f ? " ※ほかの種にも使われた名" : "")));
+    const hit = oldOf.get(sp);
+    if (hit) {                                     // 打った名前が旧名: 当たった旧名だけを右下に
+      sub.append(el("span", { class: "dist old hit", title: "打った名前は この種の旧名（シノニム）" },
+        "旧名 " + hit.map((o) => o.n + (o.f ? "※" : "")).join("、")));
+    } else {
+      const on = S.oldNames.get(sp[0]);
+      if (on) sub.append(el("span", { class: "dist old" }, "旧名: " + on.slice(0, 3).join("、") + (on.length > 3 ? " ほか" : "")));
+    }
     hits.append(el("li", { onclick: () => (picks[sp[0]] ? openPick(sp) : addSpecies(sp)) }, ja, sub));
   }
   hits.hidden = false;
@@ -364,8 +367,8 @@ function renderList() {
   // 組み合わせの一覧は書き出し済みも見せる（読み込んだ記録や前日の記録に足せるように）。
   // 「すべての未書き出し」は文字どおり未書き出しだけ。
   let rows = S.showAll ? mine().filter((r) => !r.exported) : mine().filter((r) => comboKey(r) === key);
-  // 既定は入れた順（新しい種は下に足す。＋−や同じ種の追加では動かさない＝連打で別の種を押さないように）
-  rows.sort(S.recentTop ? (a, b) => b.updated - a.updated : (a, b) => (a.created - b.created) || (a.id - b.id));
+  // 既定は入れた順を逆に（新しく入れた種が上。＋−や同じ種の追加では動かさない＝連打で別の種を押さないように。祝 2026-10-04）
+  rows.sort(S.recentTop ? (a, b) => b.updated - a.updated : (a, b) => (b.created - a.created) || (b.id - a.id));
   $("#list-title").textContent = S.showAll ? `未書き出し（${rows.length}）` : `今の地点（${rows.length}）`;
   $("#tog-all").textContent = S.showAll ? "今の地点" : "未書き出し";
   $("#empty").hidden = rows.length > 0;
