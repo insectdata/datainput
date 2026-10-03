@@ -7,7 +7,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "v33";   // 画面の版（sw.js の VERSION と合わせる。☰ に出す）
+const APP_VERSION = "v34";   // 画面の版（sw.js の VERSION と合わせる。☰ に出す）
 const AXES = ["季節", "採集方法", "地点", "その他"];
 const COLS = ["和名", "個体数", "採集方法", "地点", "その他", "季節", "備考", "採集日"];
 const $ = (s) => document.querySelector(s);

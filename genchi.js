@@ -11,7 +11,7 @@
  */
 (() => {
 "use strict";
-const GENCHI_VERSION = "g6";
+const GENCHI_VERSION = "g7";
 const $ = (s) => document.querySelector(s);
 const el = (t, attrs = {}, ...kids) => {
   const e = document.createElement(t);
@@ -206,6 +206,11 @@ function initMap() {
   $("#t-gps").onclick = () => setFollow(!S.follow);
   $("#t-fit").onclick = () => fitJob();
   $("#t-day").onclick = () => { S.allDays = !S.allDays; $("#t-day").textContent = S.allDays ? "全部の日" : "今日だけ"; drawPoints(); };
+  // 地図の真ん中の＋（map.getCenter() と同じ所。離れた場所に地点を落とすとき）
+  map.getContainer().append(el("div", { id: "cross" }));
+  const setCross = (onn) => { document.body.classList.toggle("cross", onn); $("#t-cross").classList.toggle("on", onn); $("#btn-cross").style.display = onn ? "" : "none"; kvSet("cross", onn); };
+  $("#t-cross").onclick = () => setCross(!document.body.classList.contains("cross"));
+  S.setCross = setCross;
 }
 function fitJob() {
   const b = S.mapdata && S.mapdata.範囲;
@@ -316,11 +321,12 @@ function leaveOk() {
   if (!confirm("入力の途中です。保存せずに閉じますか？（保存するなら「やめる」で戻って OK を押す）")) return false;
   S.dirty = false; S.editing = null; return true;
 }
-async function newPoint(preset) {
+async function newPoint(preset, atCross) {
   if (!leaveOk()) return;
-  const pos = await measure();
+  const pos = atCross ? null : await measure();
   let lat, lon, acc = null, how;
-  if (pos) { lat = pos.coords.latitude; lon = pos.coords.longitude; acc = Math.round(pos.coords.accuracy); how = "GPS"; }
+  if (atCross) { const c = map.getCenter(); lat = c.lat; lon = c.lng; how = "地図の＋の位置"; }
+  else if (pos) { lat = pos.coords.latitude; lon = pos.coords.longitude; acc = Math.round(pos.coords.accuracy); how = "GPS"; }
   else { const c = map.getCenter(); lat = c.lat; lon = c.lng; how = "地図の中心（位置が取れなかった）"; toast("位置が取れないので地図の真ん中に置きました。「位置を動かす」で直せます", 4000); }
   const no = S.points.filter((p) => p.day === today()).reduce((m, p) => Math.max(m, p.no), 0) + 1;
   const p = { no, day: today(), time: Date.now(), lat, lon, acc, how, alt: pos && pos.coords.altitude != null ? Math.round(pos.coords.altitude) : null,
@@ -330,6 +336,12 @@ async function newPoint(preset) {
   drawPoints();
   map.setView([lat, lon], Math.max(map.getZoom(), 17));
   if (preset) openForm(p, -1, preset); else openPoint(p, true);
+  // 入力欄が地図の下を覆うので、落とした点が見える高さまで地図をずらす
+  setTimeout(() => {
+    const h = $("#panel").offsetHeight, size = map.getSize(), want = Math.max(40, (size.y - h) / 2);
+    const pt = map.latLngToContainerPoint([lat, lon]);
+    if (pt.y > want) map.panBy([0, pt.y - want], { animate: false });
+  }, 0);
   return p;
 }
 function openPoint(p, startForm) {
@@ -646,6 +658,7 @@ function showTab(t) {
   $("#tab-map").classList.toggle("on", m); $("#tab-list").classList.toggle("on", !m);
   $("#list").style.display = m ? "none" : "block";
   for (const id of ["#tools", "#btn-here"]) $(id).style.display = m ? "" : "none";
+  $("#btn-cross").style.display = m && document.body.classList.contains("cross") ? "" : "none";
   if (!m) { $("#panel").style.display = "none"; S.cur = null; renderList(); } else { drawPoints(); setTimeout(() => map.invalidateSize(), 50); }
 }
 
@@ -1095,6 +1108,8 @@ async function boot() {
   }
   window.addEventListener("beforeunload", (e) => { if (S.dirty) { e.preventDefault(); e.returnValue = ""; } });
   $("#btn-here").onclick = () => newPoint();
+  $("#btn-cross").onclick = () => newPoint(null, true);
+  if (await kvGet("cross")) S.setCross(true);
   $("#tab-map").onclick = () => showTab("map");
   $("#tab-list").onclick = () => showTab("list");
   $("#btn-menu").onclick = () => {

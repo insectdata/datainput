@@ -26,6 +26,15 @@ header .tabs .on{background:#fff;color:var(--accent);font-weight:700}
 #list{position:fixed;top:calc(36px + env(safe-area-inset-top));left:0;right:0;bottom:0;overflow-y:auto;background:var(--bg);padding:4px;display:none}
 .fab{position:fixed;z-index:900;border:0;border-radius:999px;box-shadow:0 2px 6px rgba(0,0,0,.3);font-weight:700}
 #btn-here{left:50%;transform:translateX(-50%);bottom:calc(14px + env(safe-area-inset-bottom));background:var(--warn);color:#fff;padding:12px 24px;font-size:18px}
+/* ＋の所に記録（離れた場所。祝 2026-10-04）: ＋を出している間は 2 つ並べる */
+body.cross #btn-here{left:27%;padding:12px 16px;font-size:16px}
+#btn-cross{left:73%;transform:translateX(-50%);bottom:calc(14px + env(safe-area-inset-bottom));background:#1a4d99;color:#fff;padding:12px 16px;font-size:16px;white-space:nowrap}
+body.cross #btn-here{white-space:nowrap}
+#cross{position:absolute;left:50%;top:50%;width:44px;height:44px;margin:-22px 0 0 -22px;z-index:650;pointer-events:none;display:none}
+body.cross #cross{display:block}
+#cross::before,#cross::after{content:"";position:absolute;background:#000;box-shadow:0 0 0 2px #fff}
+#cross::before{left:21px;top:0;width:3px;height:44px}
+#cross::after{top:21px;left:0;height:3px;width:44px}
 .tools{position:fixed;z-index:900;right:8px;top:calc(46px + env(safe-area-inset-top));display:flex;flex-direction:column;gap:6px}
 .tools button{border:1px solid var(--line);background:#fff;border-radius:8px;padding:4px 8px;font-size:13px;box-shadow:0 1px 3px rgba(0,0,0,.2)}
 .tools button.on{background:var(--accent);color:#fff}
@@ -105,9 +114,11 @@ dialog label.chk input{width:20px;height:20px;margin:0}
   <button id="t-gps">現在地</button>
   <button id="t-fit">範囲</button>
   <button id="t-day">今日だけ</button>
+  <button id="t-cross" title="地図の真ん中に＋を出し、その所に地点を落とす（離れた場所を記録するとき）">＋</button>
 </div>
 <div id="here-info"></div>
 <button class="fab" id="btn-here">ここを記録</button>
+<button class="fab" id="btn-cross" style="display:none">＋の所に記録</button>
 
 <div id="list"></div>
 
