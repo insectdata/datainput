@@ -7,7 +7,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "v29";   // 画面の版（sw.js の VERSION と合わせる。☰ に出す）
+const APP_VERSION = "v30";   // 画面の版（sw.js の VERSION と合わせる。☰ に出す）
 const AXES = ["季節", "採集方法", "地点", "その他"];
 const COLS = ["和名", "個体数", "採集方法", "地点", "その他", "季節", "備考", "採集日"];
 const $ = (s) => document.querySelector(s);
@@ -378,14 +378,23 @@ function renderList() {
       el("button", { onclick: () => bump(r, -1), "aria-label": "減らす" }, "−"),
       el("input", { value: r.個体数, inputmode: "numeric", onchange: (e) => setCount(r, e.target.value) }),
       el("button", { onclick: () => bump(r, +1), "aria-label": "増やす" }, "＋"));
-    const sub = S.showAll ? `${r.季節} ${r.採集方法} ${r.地点}${r.その他 ? " " + r.その他 : ""}` : (r.備考 || "");
-    const name = el("td", { onclick: () => openEdit(r) }, r.和名, el("span", { class: "sub" }, sub + (S.showAll && r.備考 ? "　" + r.備考 : "")));
+    // 備考は subnote（PC の広い画面ではメモの欄に出すので隠す）
+    const axes = S.showAll ? `${r.季節} ${r.採集方法} ${r.地点}${r.その他 ? " " + r.その他 : ""}` : "";
+    const note = r.備考 ? (axes ? "　" : "") + r.備考 : "";
+    const name = el("td", { onclick: () => openEdit(r) }, r.和名,
+      el("span", { class: "sub" }, axes, el("span", { class: "subnote" }, note)));
+    // PC の広い画面だけに出るメモの欄（狭い画面では CSS で隠れる。スマホは和名を押して開く欄で書く）
+    const memo = el("td", { class: "memo" }, el("input", { type: "text", value: r.備考 || "", placeholder: "メモ",
+      onchange: (e) => setNote(r, e.target.value), onkeydown: (e) => { if (e.key === "Enter") e.target.blur(); } }));
     const ms = shortMarks(S.byName && S.byName.get(r.和名));
     if (ms) name.insertBefore(ms, name.lastChild);
     if (r.exported) name.insertBefore(el("span", { class: "pill", title: "書き出し済み。変えると未書き出しに戻ります" }, "済"), name.lastChild);
     // ゴミ箱は置かない（誤タップで消えるのを避ける）。消したいときは − で 0 にする。0 の記録は Excel に出ない
-    tb.append(el("tr", { class: (parseInt(r.個体数, 10) || 0) > 0 ? "" : "zero" }, name, el("td", { class: "num" }, ctr)));
+    tb.append(el("tr", { class: (parseInt(r.個体数, 10) || 0) > 0 ? "" : "zero" }, name, memo, el("td", { class: "num" }, ctr)));
   }
+  updateCounts();
+}
+function updateCounts() {
   const all = mine();
   const cnt = (r) => parseInt(r.個体数, 10) || 0;
   const pend = all.filter((r) => !r.exported && cnt(r) > 0).length;   // 0 の記録は書き出さないので数えない
@@ -399,6 +408,13 @@ function renderList() {
     + (zero ? ` ／ 個体数 0（Excel に出ない）${zero} 件` : "")
     + (others ? `（ほかの業務の記録 ${others} 件は隠れています）` : "")
     + `。書き出したファイルは業務フォルダの 入力/ に置いて、1_入力データをまとめる.bat に通します。`;
+}
+const oneLine = (s) => String(s || "").replace(/\s*[\r\n]+\s*/g, " ").trim();   // 備考は 1 行で（Excel の 1 セル）
+async function setNote(r, v) {
+  // PC のメモの欄から。一覧は作り直さない（次の欄へ移るのを邪魔しない）。和名の下の備考と数だけ直す
+  r.備考 = oneLine(v); r.updated = Date.now(); r.exported = 0;
+  await putRecord(r);
+  updateCounts();
 }
 async function bump(r, d) { await setCount(r, (parseInt(r.個体数, 10) || 0) + d); }
 async function setCount(r, v) {
@@ -675,7 +691,7 @@ async function boot() {
   };
   $("#btn-edit-save").onclick = async () => {
     const r = S.editing; if (!r) return;
-    r.備考 = $("#edit-note").value.trim();
+    r.備考 = oneLine($("#edit-note").value);
     r.個体数 = Math.max(0, parseInt($("#edit-count").value, 10) || 0);
     r.updated = Date.now(); r.exported = 0;
     await putRecord(r); $("#dlg-edit").close(); renderList();
