@@ -7,7 +7,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "v34";   // 画面の版（sw.js の VERSION と合わせる。☰ に出す）
+const APP_VERSION = "v45";   // 画面の版（sw.js の VERSION と合わせる。☰ に出す）
 const AXES = ["季節", "採集方法", "地点", "その他"];
 const COLS = ["和名", "個体数", "採集方法", "地点", "その他", "季節", "備考", "採集日"];
 const $ = (s) => document.querySelector(s);
@@ -33,7 +33,18 @@ function openDB() {
         s.createIndex("exported", "exported");
       }
     };
-    r.onsuccess = () => { DB.db = r.result; ok(); };
+    r.onsuccess = () => {
+      const d = r.result;
+      // 入れ物が欠けている（中身の無い保存場所ができてしまった）ときは、消して作り直す。欠けていれば記録も無いので失うものは無い
+      if (!d.objectStoreNames.contains("kv") || !d.objectStoreNames.contains("records")) {
+        d.close();
+        const del = indexedDB.deleteDatabase(DB.name);
+        del.onsuccess = del.onerror = () => openDB().then(ok, ng);
+        return;
+      }
+      d.onversionchange = () => d.close();   // ほかの画面が入れ替えるときは閉じて待たせない
+      DB.db = d; ok();
+    };
     r.onerror = () => ng(r.error);
   });
 }
@@ -91,6 +102,18 @@ async function loadBundleFile(file) {
 }
 // いま開いている業務の記録だけを扱う（別の業務の記録は端末に残したまま隠す）
 const mine = () => S.records.filter((r) => (r.業務 || "") === (S.bundle ? S.bundle.case : ""));
+function buildOlds() {
+  if (S.olds || !S.bundle) return;
+  const b = S.bundle;
+  S.olds = (b.olds || []).map(([n, t, f]) => ({ k: skey(n), n, t, f }));
+  S.oldNames = new Map();                          // 和名 → その種の旧名（候補の行に「旧名: …」を短く出す）
+  for (const o of S.olds) for (const i of o.t) {
+    const w = (b.species[i] || [])[0]; if (!w) continue;
+    if (!/[぀-ヿ一-鿿]/.test(o.n)) continue;   // 「旧名: …」には和名の旧名だけ（古い学名は打って当たったときだけ。祝 2026-10-04）
+    if (!S.oldNames.has(w)) S.oldNames.set(w, []);
+    S.oldNames.get(w).push(o.n + (o.f ? "※" : ""));
+  }
+}
 async function applyBundle(b) {
   S.bundle = b;
   // 業務名を持たない古い記録は、いま読み込んだ業務のものとして扱う（1業務しか無かった頃の記録）
@@ -100,14 +123,9 @@ async function applyBundle(b) {
   // 和名 → 種（一覧の行に重要種・外来種の印を出すため）
   S.byName = new Map(b.species.map((sp) => [sp[0], sp]));
   // 旧名（シノニム名。名前引き台帳の 名前の変遷 から。2026-09-29）: [旧名, [species の行の番号…], 印（1＝ほかの種にも使われた名前）]
-  S.olds = (b.olds || []).map(([n, t, f]) => ({ k: skey(n), n, t, f }));
-  S.oldNames = new Map();                          // 和名 → その種の旧名（候補の行に「旧名: …」を短く出す）
-  for (const o of S.olds) for (const i of o.t) {
-    const w = (b.species[i] || [])[0]; if (!w) continue;
-    if (!/[\u3040-\u30ff\u4e00-\u9fff]/.test(o.n)) continue;   // 「旧名: …」には和名の旧名だけ（古い学名は打って当たったときだけ。祝 2026-10-04）
-    if (!S.oldNames.has(w)) S.oldNames.set(w, []);
-    S.oldNames.get(w).push(o.n + (o.f ? "※" : ""));
-  }
+  // 旧名の検索キーは 画面が出てから裏で作る（画面の切り替えを待たせない。打つ前に作り終わるので打つときも重くならない。祝 2026-10-04）
+  S.olds = null; S.oldNames = null;
+  setTimeout(buildOlds, 400);
   const def = (b.masters || []).find((m) => m[0] === (b.masterDefault || "統合"));
   const saved = await kvGet("masterBit");
   S.masterBit = saved || (def ? def[1] : 1);
@@ -222,6 +240,7 @@ function search() {
   const hits = $("#hits");
   hits.innerHTML = "";
   if (!raw || !S.bundle) { hits.hidden = true; return; }
+  buildOlds();                                     // 裏で作り終わる前に打ったときだけ ここで作る
   const q = skey(raw), ql = raw.toLowerCase();
   // 先頭一致 → 部分一致 → 学名の先頭一致 の順。その中では採用回数の多い順、同数なら五十音順
   const pre = [], mid = [], sci = [];
@@ -713,6 +732,17 @@ async function boot() {
   if (!("indexedDB" in window)) $("#banner").hidden = false, $("#banner").textContent = "このブラウザでは記録を保存できません。";
   if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost" || location.hostname === "127.0.0.1")) {
     navigator.serviceWorker.register("./sw.js").catch(() => {});
+    // 新しい版が裏で入ったら 上に知らせる。押すまで読み直さない（入力の途中で画面を変えない。祝 2026-10-04）
+    const hadCtl = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (!hadCtl || document.getElementById("new-ver")) return;
+      const d = document.createElement("div"); d.id = "new-ver";
+      d.textContent = "新しい版があります（押すと切り替え）";
+      const hd = document.querySelector("header");   // 上のタブ（入力｜地図｜一覧）にかぶせない
+      d.style.cssText = "position:fixed;left:8px;right:8px;top:" + ((hd ? hd.getBoundingClientRect().bottom : 0) + 4) + "px;z-index:5000;background:#1565c0;color:#fff;padding:8px 10px;border-radius:6px;text-align:center;font-size:15px;box-shadow:0 2px 6px rgba(0,0,0,.3)";
+      d.onclick = () => location.reload();
+      document.body.append(d);
+    });
   }
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
 }

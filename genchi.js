@@ -11,7 +11,7 @@
  */
 (() => {
 "use strict";
-const GENCHI_VERSION = "g7";
+const GENCHI_VERSION = "g18";
 const $ = (s) => document.querySelector(s);
 const el = (t, attrs = {}, ...kids) => {
   const e = document.createElement(t);
@@ -71,7 +71,7 @@ function openDB() {
       d.createObjectStore("points", { keyPath: "id", autoIncrement: true });
       d.createObjectStore("photos", { keyPath: "id", autoIncrement: true });
     };
-    r.onsuccess = () => { DB.db = r.result; ok(); };
+    r.onsuccess = () => { DB.db = r.result; DB.db.onversionchange = () => DB.db.close(); ok(); };
     r.onerror = () => ng(r.error);
   });
 }
@@ -88,7 +88,10 @@ const delPhoto = (id) => req("photos", "readwrite", (s) => s.delete(id));
 // 種名の入力画面の業務ファイル（konchu-input の kv）を読むだけ
 function readMainBundle() {
   return new Promise((ok) => {
+    const timer = setTimeout(() => ok({}), 5000);       // 開けないまま待ち続けない（ほかの画面が開いたままのときなど）
+    const done0 = ok; ok = (v) => { clearTimeout(timer); done0(v); };
     const r = indexedDB.open("konchu-input");
+    r.onblocked = () => ok({});
     // まだ種名の入力画面を開いていない端末では作らない（ここで空の入れ物を作ると 入力画面が保存できなくなる）
     r.onupgradeneeded = () => { r.transaction.abort(); };
     r.onsuccess = () => {
@@ -175,6 +178,13 @@ function whereIs(lat, lon) {
 let map, baseStd, basePhoto, vegLayer, jobLayer, ptLayer, meMarker, meCircle, watchId = null, lastFix = null;
 const GSI = { 標準地図: "https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png", 航空写真: "https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg" };
 const ATTR = '<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank">国土地理院</a>';
+// 環境省 生物多様性センター 現存植生図2024 ラスタタイル（G空間情報センター。公共データ利用規約 第1.0版。縮尺 15 まで）。
+// 業務の地図に植生図が無いときに重ねる。画像なので凡例名は引けず、位置図にも描けない（そちらは業務ファイルの植生図）
+const VEG_TILE = "https://www.biodic.go.jp/kiso/vg/tile/veg2024raster/{z}/{x}/{y}.png";
+const VEG_ATTR = '植生: <a href="https://www.biodic.go.jp/" target="_blank">環境省生物多様性センター</a> 現存植生図2024';
+const TILES = { ...GSI, 植生図: VEG_TILE };
+let vegTiles = null;
+const vegNow = () => vegLayer || vegTiles;     // いま使う植生（業務ファイルの植生図が先）
 function vegColor(p) {
   const n = p.凡例名 || "";
   if (/市街|住宅|造成|工場|道路|人工/.test(n)) return "#bdbdbd";
@@ -197,11 +207,12 @@ function initMap() {
     map.removeLayer(photo ? baseStd : basePhoto); (photo ? basePhoto : baseStd).addTo(map);
     $("#t-layer").textContent = photo ? "地図" : "写真";
   };
+  vegTiles = L.tileLayer(VEG_TILE, { maxNativeZoom: 15, maxZoom: 20, opacity: 0.5, attribution: VEG_ATTR });
   $("#t-veg").onclick = () => {
-    if (!vegLayer) return toast("植生図は 業務の地図 が入ると出ます");
-    const on = map.hasLayer(vegLayer);
-    if (on) map.removeLayer(vegLayer); else { vegLayer.addTo(map); vegLayer.bringToBack(); }
+    const v = vegNow(), on = map.hasLayer(v);
+    if (on) map.removeLayer(v); else { v.addTo(map); if (v.bringToBack && v === vegLayer) v.bringToBack(); }
     $("#t-veg").classList.toggle("on", !on);
+    if (!on && v === vegTiles) toast("環境省の植生図（タイル）を重ねました。凡例名は業務ファイルの植生図があるときだけ引けます", 3500);
   };
   $("#t-gps").onclick = () => setFollow(!S.follow);
   $("#t-fit").onclick = () => fitJob();
@@ -223,16 +234,20 @@ function applyMapdata(md) {
   if (jobLayer) map.removeLayer(jobLayer);
   vegLayer = jobLayer = null;
   prepAreas();
-  if (!md) { $("#map-info").textContent = "まだ入っていません（業務ファイルに地図が無い）"; return; }
-  vegLayer = L.geoJSON(md.植生図, {
+  if (vegTiles) map.removeLayer(vegTiles);
+  // 植生図: 業務ファイルの植生図 → 端末に保存した環境省の植生図（ジオポータル）→ 環境省のタイル（画像。凡例名は引けない）
+  const mdVeg = md && md.植生図 && md.植生図.features.length ? md.植生図 : null;
+  S.vegFC = mdVeg || (S.vegSaved && S.vegSaved.features.length ? S.vegSaved : null);
+  if (S.vegFC) vegLayer = L.geoJSON(S.vegFC, {
     style: (f) => ({ color: "#555", weight: 0.5, fillColor: vegColor(f.properties), fillOpacity: 0.35 }),
     onEachFeature: (f, ly) => ly.on("click", (e) => {
       if (S.moving) return;
-      const p = f.properties, pl = (md.凡例の植物 || {})[String(p.凡例コード)];
+      const p = f.properties, pl = ((md && md.凡例の植物) || {})[String(p.凡例コード)];
       L.popup().setLatLng(e.latlng).setContent(`<b>${p.凡例名}</b>` + (pl ? `<br>主な植物（調査地点 ${pl.調査地点数}）: ${pl.植物.slice(0, 6).map((x) => `${x[0]}(${Math.round(x[1])}%)`).join("・")}` : "<br>調査の地点なし")).openOn(map);
     }),
   });
-  if ($("#t-veg").classList.contains("on")) vegLayer.addTo(map);
+  if ($("#t-veg").classList.contains("on")) (vegLayer || vegTiles).addTo(map);
+  if (!md) { $("#map-info").textContent = "まだ入っていません（業務ファイルに地図が無い）" + (S.vegSaved ? `。保存した植生図 ${S.vegSaved.features.length} ポリゴン` : ""); if (vegLayer && map.hasLayer(vegLayer)) vegLayer.bringToBack(); return; }
   jobLayer = L.geoJSON(md.地図, {
     style: (f) => (f.geometry.type === "Point" ? {} : { color: f.properties.色 || "#1565c0", weight: 3, fill: false, dashArray: /バッファ/.test(f.properties.名前) ? "6 6" : null }),
     pointToLayer: (f, ll) => L.circleMarker(ll, { radius: 6, color: "#333", weight: 1.5, fillColor: "#ffd600", fillOpacity: 1 })
@@ -240,11 +255,11 @@ function applyMapdata(md) {
     onEachFeature: (f, ly) => { if (f.geometry.type !== "Point") ly.bindTooltip(f.properties.名前, { sticky: true }); },
   }).addTo(map);
   if (vegLayer && map.hasLayer(vegLayer)) vegLayer.bringToBack();
-  $("#map-info").textContent = `${md.業務}（作成 ${md.作成}・地図 ${md.地図.features.length}・植生図 ${md.植生図.features.length}）`;
+  $("#map-info").textContent = `${md.業務}（作成 ${md.作成}・地図 ${md.地図.features.length}・植生図 ${(md.植生図 || { features: [] }).features.length}）` + (S.vegSaved ? `。保存した植生図 ${S.vegSaved.features.length}` : "");
 }
 function vegAt(lat, lon) {
-  if (!S.mapdata) return null;
-  for (const f of S.mapdata.植生図.features) {
+  if (!S.vegFC) return null;
+  for (const f of S.vegFC.features) {
     const g = f.geometry, polys = g.type === "Polygon" ? [g.coordinates] : g.coordinates;
     for (const pg of polys) if (inRing(lon, lat, pg[0]) && !pg.slice(1).some((h) => inRing(lon, lat, h))) return f.properties;
   }
@@ -260,12 +275,27 @@ function vegNear(lat, lon) {
 }
 
 // ---------------------------------------------------------------- 現在地
+// 位置が取れないわけを日本語で（地図の範囲とは関係ない）
+function geoWhy(e) {
+  if (!e) return "位置が取れません";
+  if (e.code === 1) return "位置情報の使用が許可されていません。① Android の設定 → アプリ → Chrome → 権限 → 位置情報（正確な位置情報もオン） ② Chrome のアドレスバー左 → 権限 → 位置情報を許可（ブロックならリセット）";
+  if (e.code === 2) return "位置が分かりません。端末の位置情報（GPS）がオフか、PC など GPS の無い機械です";
+  if (e.code === 3) return "時間内に位置をつかめませんでした（屋内・建物のすき間など）。空の見える所で もう一度";
+  return "位置が取れません: " + (e.message || "");
+}
 function setFollow(on) {
   S.follow = on;
   $("#t-gps").classList.toggle("on", on);
   if (on) {
     if (!navigator.geolocation) return toast("この端末では位置を取れません");
-    watchId = navigator.geolocation.watchPosition(onFix, (e) => toast("位置が取れません: " + e.message), { enableHighAccuracy: true, maximumAge: 5000, timeout: 30000 });
+    let low = false;
+    const fail = (e) => {
+      // 正確な位置（GPS）が取れないときは 大まかな位置（Wi-Fi など）で取り直す。許可が無いときはやめる
+      if (!low && e && e.code !== 1) { low = true; navigator.geolocation.clearWatch(watchId); watchId = navigator.geolocation.watchPosition(onFix, fail, { enableHighAccuracy: false, maximumAge: 30000, timeout: 30000 }); toast("GPS が取れないので大まかな位置で探しています…", 3500); return; }
+      toast(geoWhy(e), 6000);
+      if (e && e.code === 1) setFollow(false);
+    };
+    watchId = navigator.geolocation.watchPosition(onFix, fail, { enableHighAccuracy: true, maximumAge: 5000, timeout: 30000 });
   } else if (watchId != null) { navigator.geolocation.clearWatch(watchId); watchId = null; }
 }
 function onFix(pos) {
@@ -285,8 +315,11 @@ function measure() {
   return new Promise((ok) => {
     if (!navigator.geolocation) { ok(null); return; }
     toast("位置を測っています…");
-    navigator.geolocation.getCurrentPosition((p) => ok(p), () => ok(lastFix && Date.now() - lastFix.timestamp < 60000 ? lastFix : null),
-      { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 });
+    navigator.geolocation.getCurrentPosition((p) => ok(p), (e) => {
+      const recent = lastFix && Date.now() - lastFix.timestamp < 60000 ? lastFix : null;
+      if (!recent) toast(geoWhy(e) + "。地図の真ん中に置くので「位置を動かす」で直してください", 6000);
+      ok(recent);
+    }, { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 });
   });
 }
 
@@ -327,9 +360,9 @@ async function newPoint(preset, atCross) {
   let lat, lon, acc = null, how;
   if (atCross) { const c = map.getCenter(); lat = c.lat; lon = c.lng; how = "地図の＋の位置"; }
   else if (pos) { lat = pos.coords.latitude; lon = pos.coords.longitude; acc = Math.round(pos.coords.accuracy); how = "GPS"; }
-  else { const c = map.getCenter(); lat = c.lat; lon = c.lng; how = "地図の中心（位置が取れなかった）"; toast("位置が取れないので地図の真ん中に置きました。「位置を動かす」で直せます", 4000); }
+  else { const c = map.getCenter(); lat = c.lat; lon = c.lng; how = "地図の中心（位置が取れなかった）"; }   // 知らせ（取れないわけ）は measure が出す
   const no = S.points.filter((p) => p.day === today()).reduce((m, p) => Math.max(m, p.no), 0) + 1;
-  const p = { no, day: today(), time: Date.now(), lat, lon, acc, how, alt: pos && pos.coords.altitude != null ? Math.round(pos.coords.altitude) : null,
+  const p = { 業務: jobName(), no, day: today(), time: Date.now(), lat, lon, acc, how, alt: pos && pos.coords.altitude != null ? Math.round(pos.coords.altitude) : null,
     veg: (vegAt(lat, lon) || {}).凡例名 || "", recs: [] };
   p.id = await putPoint(p);
   S.points.push(p);
@@ -429,17 +462,41 @@ async function thumbImg(pid) {
   return el("span", { class: "th", onclick: (e) => { e.stopPropagation(); showBig(pid); } },
     el("img", { src: ph.thumb, alt: "" }), ph.種類 ? el("b", {}, ph.種類) : null);
 }
-function chipRow(words, target, onChange) {
+// 札は 欄ごとに数を決め、使った回数の多い順に上から取る（少ないものは表から外れる。各人のクセが残る。祝 2026-10-04）。
+// 回数は 保存したときに欄の言葉（「、」で区切る）を数える。手で書いた言葉も 2 回以上で札の候補になる。長押しで札を外す（-1）
+const CHIP_N = { 状態: 7, 環境: 14, 植物: 14, メモ名: 10, メモ動: 10, メモ句: 6 };
+const cnt = (field, w) => S.usage[field + ":" + w] || 0;
+function bump(field, w) { const k = field + ":" + w; if ((S.usage[k] || 0) < 0) S.usage[k] = 0; S.usage[k] = (S.usage[k] || 0) + 1; }   // 外した札も また書けば 1 から数え直す
+function pool(field, base, pinned) {
+  const N = CHIP_N[field] || 12, pin = [...new Set(pinned)].filter((w) => cnt(field, w) >= 0);
+  const pre = field + ":";
+  const learned = Object.keys(S.usage).filter((k) => k.startsWith(pre) && S.usage[k] >= 2).map((k) => k.slice(pre.length));
+  const order = new Map([...base].map((w, i) => [w, i]));
+  const rest = [...new Set([...base, ...learned])].filter((w) => !pin.includes(w) && cnt(field, w) >= 0)
+    .sort((a, b) => (cnt(field, b) - cnt(field, a)) || ((order.has(a) ? order.get(a) : 999) - (order.has(b) ? order.get(b) : 999)));
+  return pin.concat(rest).slice(0, N);       // どの欄も決めた数ちょうど（多いと似た札を押しまちがえる）
+}
+function longPress(btn, field, w) {           // 長押しで札を外す
+  let tm = null;
+  const start = () => { tm = setTimeout(() => { tm = null; if (confirm(`「${w}」の札を外しますか（また書けば戻ります）`)) { S.usage[field + ":" + w] = -1; kvSet("usage", S.usage); btn.remove(); } }, 650); };
+  const stop = () => { if (tm) clearTimeout(tm); tm = null; };
+  btn.addEventListener("pointerdown", start); for (const ev of ["pointerup", "pointerleave", "pointercancel"]) btn.addEventListener(ev, stop);
+  btn.addEventListener("contextmenu", (e) => e.preventDefault());
+}
+function chipRow(words, target, onChange, field) {
   const box = el("div", { class: "chips" });
-  for (const w of words) box.append(el("button", { type: "button", onclick: () => {
-    const v = target.value.trim();
-    if (!v.split(/[、,]/).map((x) => x.trim()).includes(w)) target.value = v ? v + "、" + w : w;
-    S.usage[w] = (S.usage[w] || 0) + 1; kvSet("usage", S.usage);
-    onChange(target.value);
-  } }, w));
+  for (const w of words) {
+    const b = el("button", { type: "button", onclick: () => {
+      const v = target.value.trim();
+      if (!v.split(/[、,]/).map((x) => x.trim()).includes(w)) target.value = v ? v + "、" + w : w;
+      onChange(target.value);
+    } }, w);
+    if (field) longPress(b, field, w);
+    box.append(b);
+  }
   return box;
 }
-const byUse = (arr) => [...new Set(arr)].sort((a, b) => (S.usage[b] || 0) - (S.usage[a] || 0));
+const byUse = (arr) => [...new Set(arr)];
 // 前回と同じ: 近い（200 m 以内の）別の地点の、いちばん新しい記録の 環境・植物。無ければ最後に保存した記録
 function lastLike(p) {
   const cands = [];
@@ -462,6 +519,7 @@ function openForm(p, idx, preset) {
   for (const k of KUBUN) seg.append(el("button", { type: "button", class: k + (r.区分 === k ? " on" : ""), onclick: () => {
     r.区分 = k; dirty(); [...seg.children].forEach((b) => b.classList.toggle("on", b.textContent === k)); nameBox.style.display = k === "環境" ? "none" : "";
     nameLabel.textContent = k === "要確認" ? "和名（仮の名前でよい。○○属の一種 など。空でもよい）" : "和名";
+    onlyBox.style.display = k === "重要種" ? "" : "none"; if (q.value) q.oninput();
   } }, k));
   // 和名（索引から。旧名でも引ける）
   const q = el("input", { type: "search", placeholder: S.bundle ? "和名（カタカナ・ひらがな）" : "業務ファイルが無いので自由に書く", value: r.和名, autocomplete: "off" });
@@ -469,7 +527,13 @@ function openForm(p, idx, preset) {
   const hits = el("ul", { class: "hits", style: "display:none" });
   const chosen = el("div", { class: "meta" });
   const showChosen = () => { const ms = marksOf(r.和名); chosen.textContent = r.和名 ? `→ ${r.和名}` + (ms.length ? "　" + ms.map((m) => m.text).join("・") : "") : ""; };
-  q.oninput = () => { r.和名 = q.value.trim(); showChosen(); searchName(q.value, hits, (sp) => { r.和名 = sp[0]; q.value = sp[0]; hits.style.display = "none"; showChosen(); dirty(); }); };
+  // 区分が重要種のときは 業務の対象の重要種だけを候補に（祝 2026-10-04。切り替えで全部からも）
+  // 他県の重要種と取り違えないよう、切り替えは置かない（祝 2026-10-04「指定したものだけで」）
+  const rdbNames = ((S.bundle && S.bundle.rdbCols) || []).filter((c) => c[2] !== "外来種").map((c) => c[1] || c[0]);
+  const targetOnly = () => r.区分 === "重要種" && rdbNames.length > 0;
+  const onlyBox = el("div", { class: "meta" }, rdbNames.length ? `候補は業務で指定した重要種だけ（${rdbNames.join("・")}）。載っていない種は「確認種」か「要確認」で` : "業務ファイルに重要種の指定がありません");
+  onlyBox.style.display = r.区分 === "重要種" ? "" : "none";
+  q.oninput = () => { r.和名 = q.value.trim(); showChosen(); searchName(q.value, hits, (sp) => { r.和名 = sp[0]; q.value = sp[0]; hits.style.display = "none"; showChosen(); dirty(); }, targetOnly()); };
   showChosen();
   nameBox.style.display = r.区分 === "環境" ? "none" : "";
   // 種名の入力画面で数えた種（📍から来た）は、書き出しの入力データ（集計）に出さない（二重に数えない）
@@ -478,24 +542,41 @@ function openForm(p, idx, preset) {
     "種名の入力画面で数えた（集計の入力データに出さない）");
   counted.querySelector("input").checked = !!r.数え済み;
   const on = (k) => FIXED.has(k) || S.fields[k] !== false;           // ☰ の「入力欄に出す項目」（業務ごと。発注者・調査項目で変わる。祝 2026-10-04）
-  nameBox.append(...[nameLabel, q, hits, chosen, on("数え済み") ? counted : null,
+  nameBox.append(...[nameLabel, onlyBox, q, hits, chosen, on("数え済み") ? counted : null,
     (on("個体数") || on("方法")) ? el("div", { class: "two" },
       on("個体数") ? el("div", {}, el("label", {}, "個体数"), el("input", { type: "text", inputmode: "numeric", value: r.個体数, oninput: (e) => { r.個体数 = e.target.value; } })) : null,
       on("方法") ? el("div", {}, el("label", {}, "方法"), methodInput(r)) : null) : null].filter(Boolean));
   // 確認したもの（成虫・蛹・幼虫・卵・成体・幼体・幼生・成獣・幼獣・足跡・糞・食痕 など。いくつでも。押すと入・切。よく使うものが前）
   const stageBox = el("div", { class: "chips" });
   const stages = new Set((r.状態 || "").split("・").filter(Boolean));
-  const stageOrder = [...STAGES].sort((a, b) => (S.usage["状態:" + b] || 0) - (S.usage["状態:" + a] || 0));
-  const drawStages = () => { stageBox.innerHTML = ""; for (const s of stageOrder) stageBox.append(el("button", { type: "button", class: stages.has(s) ? "on" : "",
-    onclick: () => { stages.has(s) ? stages.delete(s) : stages.add(s); r.状態 = STAGES.filter((x) => stages.has(x)).concat([...stages].filter((x) => !STAGES.includes(x))).join("・"); dirty(); drawStages(); } }, s)); };
+  // 札は ちょうど 7 個の入れ替え制（よく使う順。選んでいるものも上位に無ければ札に出さない＝似た札の押しまちがいを防ぐ）＋自由記入（2 回以上で札に。祝 2026-10-04）
+  const stageOrder = pool("状態", STAGES, []);
+  const stageSel = el("div", { class: "meta" });
+  const setStages = () => { r.状態 = STAGES.filter((x) => stages.has(x)).concat([...stages].filter((x) => !STAGES.includes(x))).join("・"); dirty(); drawStages(); };
+  const stageFree = el("input", { type: "text", placeholder: "札に無いもの（例 若齢幼虫・交尾中）", style: "flex:1;min-width:0" });
+  const addFree = () => { const v = stageFree.value.trim(); if (!v) return; for (const s of v.split(/[・、,，]/).map((x) => x.trim()).filter(Boolean)) stages.add(s); stageFree.value = ""; setStages(); };
+  stageFree.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); addFree(); } });
+  const drawStages = () => {
+    stageBox.innerHTML = "";
+    for (const s of stageOrder) {
+      const b = el("button", { type: "button", class: stages.has(s) ? "on" : "", onclick: () => { stages.has(s) ? stages.delete(s) : stages.add(s); setStages(); } }, s);
+      longPress(b, "状態", s); stageBox.append(b);
+    }
+    // 札に出ていないものを選んでいるときは 文字で出す
+    const hidden = [...stages].filter((s) => !stageOrder.includes(s));
+    stageSel.innerHTML = "";
+    if (hidden.length) stageSel.append(`選んだもの（札の外）：${hidden.join("・")}　`, el("button", { type: "button", class: "btn sec small", onclick: () => { stages.clear(); setStages(); } }, "選び直す"));
+  };
   drawStages();
+  const stageFreeRow = el("div", { class: "row" }, stageFree, el("button", { type: "button", class: "btn sec small", onclick: addFree }, "足す"));
   // 生息環境（おおまかな区分。植生図の凡例をその区分に寄せて先頭に）・周囲の植物
   const env = el("textarea", { rows: 2, placeholder: "札を押すと入る。書き足しもできる", oninput: (e) => { r.環境 = e.target.value; } }); env.value = r.環境 || "";
   const near = vegNear(p.lat, p.lon), sug = [...new Set(near.map(habitatOf).filter(Boolean))];
-  const envChips = chipRow([...sug, ...byUse(HABITATS).filter((h) => !sug.includes(h))], env, (v) => { r.環境 = v; dirty(); });
+  const envChips = chipRow(pool("環境", HABITATS, sug), env, (v) => { r.環境 = v; dirty(); }, "環境");
   const pl = el("textarea", { rows: 2, placeholder: "周囲で確認した植物の札を押す。札に無い植物は書く", oninput: (e) => { r.植物 = e.target.value; } }); pl.value = r.植物 || "";
-  const legend = S.mapdata && vegAt(p.lat, p.lon), lp = legend && (S.mapdata.凡例の植物 || {})[String(legend.凡例コード)];
-  const plChips = chipRow(byUse(lp ? lp.植物.map((x) => x[0]) : []), pl, (v) => { r.植物 = v; dirty(); });
+  const legend = vegAt(p.lat, p.lon), lp = legend && ((S.mapdata && S.mapdata.凡例の植物) || {})[String(legend.凡例コード)];
+  const lpNames = lp ? lp.植物.map((x) => x[0]) : [];
+  const plChips = chipRow(pool("植物", lpNames.slice(6), lpNames.slice(0, 6)), pl, (v) => { r.植物 = v; dirty(); }, "植物");
   const prev = lastLike(p);
   const same = prev ? el("button", { type: "button", class: "btn sec small", onclick: () => {
     env.value = prev.環境 || ""; pl.value = prev.植物 || ""; r.環境 = env.value; r.植物 = pl.value; dirty(); toast("前回の環境・植物を入れました");
@@ -506,12 +587,15 @@ function openForm(p, idx, preset) {
     let v = memo.value.replace(/\s+$/, "");
     if (noun && v && !/[、。]$/.test(v)) v += "、";
     memo.value = v + w; r.メモ = memo.value; dirty();
-    S.usage["メモ:" + w] = (S.usage["メモ:" + w] || 0) + 1; kvSet("usage", S.usage);
+    bump(noun ? "メモ名" : "メモ動", w); kvSet("usage", S.usage);
   };
-  const memoUse = (arr) => [...new Set(arr)].sort((a, b) => (S.usage["メモ:" + b] || 0) - (S.usage["メモ:" + a] || 0));
   const plantNames = [...(r.植物 || "").split(/[、,]/).map((x) => x.trim()).filter(Boolean), ...(lp ? lp.植物.slice(0, 8).map((x) => x[0]) : [])];
-  const memoNouns = el("div", { class: "chips" }, ...memoUse([...MEMO_NOUNS, ...plantNames]).map((w) => el("button", { type: "button", class: "noun", onclick: () => memoAdd(w, true) }, w)));
-  const memoActs = el("div", { class: "chips" }, ...memoUse(MEMO_ACTS).map((w) => el("button", { type: "button", class: "act", onclick: () => memoAdd(w, false) }, w)));
+  const mk = (field, cls, words, noun) => el("div", { class: "chips" }, ...words.map((w) => { const b = el("button", { type: "button", class: cls, onclick: () => memoAdd(w, noun) }, w); longPress(b, field, w); return b; }));
+  const memoNouns = mk("メモ名", "noun", pool("メモ名", [...MEMO_NOUNS, ...plantNames], []), true);
+  const memoActs = mk("メモ動", "act", pool("メモ動", MEMO_ACTS, []), false);
+  // よく書くメモ（保存したメモを「、」「。」で分けた一続き。2 回以上書いたもの）
+  const phrases = pool("メモ句", [], []);
+  const memoPhr = phrases.length ? el("div", { class: "chips" }, ...phrases.map((w) => { const b = el("button", { type: "button", class: "phr", onclick: () => memoAdd(w, true) }, w); longPress(b, "メモ句", w); return b; })) : null;
   // デジカメの画像番号（スマホで撮らないとき）
   const cam = el("input", { type: "text", value: r.カメラ番号 || "", placeholder: "例 DSC_1234〜1240", oninput: (e) => { r.カメラ番号 = e.target.value; } });
   // 写真
@@ -531,8 +615,8 @@ function openForm(p, idx, preset) {
     el("button", { type: "button", class: "btn sec small", onclick: () => { kind = r.区分 === "環境" ? "近景" : "個体"; gal.click(); } }, "写真を選ぶ"), file, gal);
   const part = (k, ...xs) => (on(k) ? xs : []);
   f.append(seg, nameBox,
-    ...part("状態", el("label", {}, "確認したもの（いくつでも）"), stageBox),
-    ...part("メモ", el("label", {}, "メモ（確認の状況。札は 名前＋動き で組める）"), memoNouns, memoActs, memo),
+    ...part("状態", el("label", {}, "確認したもの（いくつでも。長押しで札を外す）"), stageBox, stageSel, stageFreeRow),
+    ...part("メモ", el("label", {}, "メモ（確認の状況。札は 名前＋動き で組める。長押しで札を外す）"), ...(memoPhr ? [memoPhr] : []), memoNouns, memoActs, memo),
     ...part("環境", el("label", {}, "生息環境" + (near.length ? `（植生図: ${near.join("・")}）` : "")), el("div", { class: "row" }, same), envChips, env),
     ...part("植物", el("label", {}, "周囲で確認された植物" + (lp ? `（${legend.凡例名} の主な植物。調査地点 ${lp.調査地点数}）` : legend ? `（${legend.凡例名}。調査の地点なし）` : "")), plChips, pl),
     ...part("写真", el("label", {}, "写真（スマホ）"), th, shootRow),
@@ -552,21 +636,25 @@ function methodInput(r) {
   const dl = el("datalist", { id }); for (const o of [...new Set(opts)]) dl.append(el("option", { value: o }));
   return el("span", {}, inp, dl);
 }
-function searchName(raw, ul, pick) {
+// 業務の対象の重要種（調査設定「重要種」シートで ○ を付けた RL に載る種。外来種だけの印は入れない）
+const isTarget = (sp) => marksOf(sp[0]).some((m) => !m.alien);
+function searchName(raw, ul, pick, onlyTarget) {
   ul.innerHTML = "";
   if (!S.bundle || !raw.trim()) { ul.style.display = "none"; return; }
   const q = skey(raw), pre = [], mid = [];
   for (const sp of S.bundle.species) {
     if (!(sp[4] & S.masterBit)) continue;
+    if (onlyTarget && !isTarget(sp)) continue;
     if (sp[5].startsWith(q)) pre.push(sp); else if (mid.length < 100 && sp[5].includes(q)) mid.push(sp);
   }
   const used = (sp) => S.usage["種:" + sp[0]] || 0;
   pre.sort((a, b) => used(b) - used(a));
   const list = pre.slice(0, 30).concat(mid.slice(0, Math.max(0, 30 - pre.length)));
   const oldHit = new Map();
+  buildOlds();
   if (q.length >= 2) for (const o of S.olds) {
     if (!o.k.startsWith(q)) continue;
-    for (const i of o.t) { const sp = S.bundle.species[i]; if (sp) { oldHit.set(sp, o.n); if (!list.includes(sp)) list.push(sp); } }
+    for (const i of o.t) { const sp = S.bundle.species[i]; if (sp && !(onlyTarget && !isTarget(sp))) { oldHit.set(sp, o.n); if (!list.includes(sp)) list.push(sp); } }
     if (list.length > 40) break;
   }
   for (const sp of list) {
@@ -575,7 +663,7 @@ function searchName(raw, ul, pick) {
       ...ms.map((m) => el("span", { class: "tag" + (m.alien ? " alien" : "") }, m.text)),
       el("small", {}, `${sp[2] || ""}${oldHit.has(sp) ? "　旧名 " + oldHit.get(sp) : ""}`)));
   }
-  if (!list.length) ul.append(el("li", {}, "候補なし（このまま書いた名前で保存できます）"));
+  if (!list.length) ul.append(el("li", {}, onlyTarget ? "業務で指定した重要種に候補なし（重要種でなければ「確認種」、分からなければ「要確認」）" : "候補なし（このまま書いた名前で保存できます）"));
   ul.style.display = "block";
 }
 async function savePhoto(file, kind) {
@@ -591,12 +679,22 @@ async function saveForm() {
   const { p, idx, r } = S.editing;
   r.和名 = (r.和名 || "").trim();
   if ((r.区分 === "重要種" || r.区分 === "確認種") && !r.和名) return toast("和名を入れてください（分からないときは「要確認」、地点・写真だけなら「環境」）");
+  // 重要種は 業務で指定した RL に載る種だけ（候補に出なければ重要種ではない。祝 2026-10-04）
+  if (r.区分 === "重要種" && S.bundle && (S.bundle.rdbCols || []).some((c) => c[2] !== "外来種")) {
+    const sp = S.byName && S.byName.get(r.和名);
+    if (!sp || !isTarget(sp)) return toast(`「${r.和名}」は業務で指定した重要種にありません。候補から選ぶか、区分を「確認種」「要確認」に`, 5000);
+  }
   if (r.区分 !== "環境" && !(r.メモ || "").trim() && !confirm("メモが空です。このまま保存しますか？（確認の状況を書いておくと あとで役に立ちます）")) return;
   r.季節 = r.季節 || S.axes["季節"] || ""; r.調査地点 = r.調査地点 || S.axes["地点"] || ""; r.その他 = r.その他 || S.axes["その他"] || "";
   r.time = r.time || Date.now();
   // 使った回数（札・選ぶ欄の並びに使う）
   if (r.方法) S.usage["方法:" + r.方法] = (S.usage["方法:" + r.方法] || 0) + 1;
-  for (const s of (r.状態 || "").split("・").filter(Boolean)) S.usage["状態:" + s] = (S.usage["状態:" + s] || 0) + 1;
+  for (const s of (r.状態 || "").split("・").filter(Boolean)) bump("状態", s);
+  // 欄の言葉を数える（手で書いた言葉も。2 回以上で札の候補）
+  const words = (s, re) => [...new Set((s || "").split(re).map((x) => x.trim()).filter((x) => x.length >= 2 && x.length <= 24))];
+  for (const w of words(r.環境, /[、,，\n]/)) bump("環境", w);
+  for (const w of words(r.植物, /[、,，\n]/)) bump("植物", w);
+  for (const w of words(r.メモ, /[、。,，\n]/)) bump("メモ句", w);
   kvSet("usage", S.usage);
   if (idx >= 0) p.recs[idx] = r; else p.recs.push(r);
   await putPoint(p); S.dirty = false; drawPoints(); openPoint(p);
@@ -668,27 +766,99 @@ function tileXY(lon, lat, z) {
   const r = lat * Math.PI / 180, y = Math.floor((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * n);
   return [x, y];
 }
-async function cacheArea() {
-  const b = S.mapdata && S.mapdata.範囲;
-  if (!b) return toast("業務の地図が入っていません");
+// 範囲 b=[西,南,東,北] を 縮尺 z0〜z1、地図の種類 kinds で貯める。保存した範囲は地図に点線の枠で出す
+function tileUrls(b, z0, z1, kinds) {
   const urls = [];
-  for (let z = 13; z <= 18; z++) {
+  for (let z = z0; z <= z1; z++) {
     const [x0, y1] = tileXY(b[0], b[1], z), [x1, y0] = tileXY(b[2], b[3], z);
-    for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) for (const u of Object.values(GSI)) urls.push(u.replace("{z}", z).replace("{x}", x).replace("{y}", y));
+    for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) for (const k of kinds) if (k !== "植生図" || z <= 15) urls.push(TILES[k].replace("{z}", z).replace("{x}", x).replace("{y}", y));
   }
-  if (!confirm(`地理院の地図を ${urls.length} 枚（標準地図・航空写真、縮尺 13〜18）貯めます。Wi-Fi など電波のよい所で。よいですか？`)) return;
+  return urls;
+}
+async function saveTiles(b, z0, z1, kinds, label, info) {
+  const urls = tileUrls(b, z0, z1, kinds);
+  const mb = Math.round(urls.reduce((a, u) => a + (u.endsWith(".jpg") ? 45 : 20), 0) / 1024);
+  if (urls.length > 6000) return toast(`${urls.length} 枚になり多すぎます。地図を拡大して範囲を狭めるか、縮尺の深さを浅くしてください`, 5000);
+  if (!confirm(`地理院の地図を ${urls.length} 枚（およそ ${mb || 1} MB。${kinds.join("・")}、縮尺 ${z0}〜${z1}）貯めます。電波のよい所で。よいですか？`)) return;
   const c = await caches.open("gsi-tiles");
   let done = 0, ng = 0;
   const work = async () => {
     while (urls.length) {
       const u = urls.shift();
-      try { if (!(await c.match(u))) { const res = await fetch(u, { mode: "cors" }); if (res.ok) await c.put(u, res); else ng++; } } catch (e) { ng++; }
-      done++; if (done % 20 === 0) $("#cache-info").textContent = `貯めています… ${done} 枚`;
+      try { if (!(await c.match(u))) { const veg = u.includes("biodic.go.jp"); const res = await fetch(u, { mode: veg ? "no-cors" : "cors" }); if (res.ok || res.type === "opaque") await c.put(u, res); else ng++; } } catch (e) { ng++; }
+      done++; if (done % 20 === 0) info.textContent = `貯めています… ${done} 枚`;
     }
   };
-  await Promise.all([work(), work(), work()]);
-  $("#cache-info").textContent = `貯めました（${done} 枚${ng ? `、取れなかった ${ng} 枚` : ""}）。圏外でもこの範囲は見られます。`;
-  await kvSet("cached", { at: Date.now(), n: done, 業務: S.mapdata.業務 });
+  await Promise.all([work(), work(), work(), work()]);
+  info.textContent = `貯めました（${done} 枚${ng ? `、取れなかった ${ng} 枚` : ""}）。圏外でもこの範囲は見られます。`;
+  const areas = (await kvGet("savedAreas")) || [];
+  areas.push({ b, z0, z1, kinds, label, at: Date.now() });
+  await kvSet("savedAreas", areas); drawSaved(areas); storageInfo();
+}
+async function cacheArea() {
+  const b = S.mapdata && S.mapdata.範囲;
+  if (!b) return toast("業務の地図が入っていません。地図を動かして「いま画面に出ている範囲を保存」を使ってください", 5000);
+  await saveTiles(b, 13, 18, ["標準地図", "航空写真"], S.mapdata.業務 + " の範囲", $("#cache-info"));
+}
+// いま画面に出ている範囲を保存（業務の地図が無い調査地でも。電波のあるうちに下準備。祝 2026-10-04）
+async function cacheView() {
+  const bd = map.getBounds(), b = [bd.getWest(), bd.getSouth(), bd.getEast(), bd.getNorth()];
+  const z0 = Math.max(10, Math.min(map.getZoom(), 18)), z1 = Math.min(18, Math.max(z0, z0 + parseInt($("#view-depth").value, 10)));
+  const kinds = ($("#view-kind").value === "両方" ? ["標準地図", "航空写真"] : [$("#view-kind").value]).concat($("#view-veg").checked ? ["植生図"] : []);
+  $("#dlg-menu").close();
+  toast("この範囲を貯めます（終わるまで画面を開いたままに）", 4000);
+  await saveTiles(b, z0, z1, kinds, `${ymd()} の保存`, $("#view-info"));
+  let msg = $("#view-info").textContent;
+  if ($("#view-veg").checked) { const n = await saveVeg(b, $("#view-info")); if (n) msg += `　植生図 ${n} ポリゴンも保存（凡例名つき）`; $("#view-info").textContent = msg; }
+  toast(msg, 5000);
+}
+// 環境省ジオポータル（ArcGIS。現存植生図2024 全国 8 ブロック。CC-BY 4.0）から 範囲の植生図を 形と凡例名つきで取る（祝 2026-10-04）
+const VEG_FS = (n) => `https://svr-moej.gisservice.jp/arcgis/rest/services/Hosted/veg2024bk${n}/FeatureServer/0/query`;
+async function fetchVegBox(b) {
+  const qs = new URLSearchParams({ geometry: b.join(","), geometryType: "esriGeometryEnvelope", inSR: "4326", outSR: "4326",
+    spatialRel: "esriSpatialRelIntersects", outFields: "*", maxAllowableOffset: "0.00001", geometryPrecision: "6", f: "geojson" });
+  const res = await Promise.all([1, 2, 3, 4, 5, 6, 7, 8].map((n) => fetch(VEG_FS(n) + "?" + qs, { mode: "cors" }).then((r) => r.json()).catch(() => null)));
+  const out = [];
+  let over = false;
+  for (const d of res) {
+    if (!d || !d.features) continue;
+    if (d.properties && d.properties.exceededTransferLimit) over = true;
+    for (const f of d.features) {
+      const p = f.properties || {};
+      out.push({ type: "Feature", id: p.fid, properties: { 凡例コード: String(p.凡例コード || ""), 凡例名: p.凡例名 || "", 植生自然度: String(p.植生自然度 || ""), 植生区分: p.植生区分 || "", 大区分コード: "" }, geometry: f.geometry });
+    }
+  }
+  return { features: out, over };
+}
+async function saveVeg(b, info) {
+  info.textContent = "植生図を取っています…";
+  const got = await fetchVegBox(b);
+  if (!got.features.length) { info.textContent = "植生図を取れませんでした（電波・範囲を確かめる）"; return 0; }
+  const old = (await kvGet("vegSaved")) || { type: "FeatureCollection", features: [] };
+  const byId = new Map(old.features.map((f) => [f.id, f]));
+  for (const f of got.features) byId.set(f.id, f);
+  S.vegSaved = { type: "FeatureCollection", features: [...byId.values()] };
+  await kvSet("vegSaved", S.vegSaved);
+  applyMapdata(S.mapdata);
+  if (got.over) toast("植生図が多すぎて一部しか取れませんでした。拡大して範囲を狭めてください", 5000);
+  return got.features.length;
+}
+let savedLayer = null;
+function drawSaved(areas) {
+  if (savedLayer) map.removeLayer(savedLayer);
+  savedLayer = L.layerGroup(areas.map((a) => L.rectangle([[a.b[1], a.b[0]], [a.b[3], a.b[2]]], { color: "#7b1fa2", weight: 3, dashArray: "10 6", fill: false, interactive: false }))).addTo(map);
+}
+async function storageInfo() {
+  const box = $("#storage-info"); if (!box) return;
+  try {
+    const e = await navigator.storage.estimate(), n = ((await kvGet("savedAreas")) || []).length;
+    box.textContent = `保存した範囲 ${n}・端末の使用 およそ ${Math.round((e.usage || 0) / 1048576)} MB`;
+  } catch (err) { box.textContent = ""; }
+}
+async function clearTiles() {
+  if (!confirm("貯めた地理院の地図をすべて端末から消します（記録・写真は消えません）。よいですか？")) return;
+  await caches.delete("gsi-tiles"); await kvSet("savedAreas", []); await kvSet("vegSaved", null); S.vegSaved = null; applyMapdata(S.mapdata);
+  drawSaved([]); storageInfo(); toast("貯めた地図（植生図も）を消しました");
 }
 
 // ---------------------------------------------------------------- 位置図（A4 縦 1240×1754。150 dpi）
@@ -754,9 +924,9 @@ async function drawFigure(day, focus) {
   await Promise.all(jobs);
   // 植生図
   const vegUsed = new Map();
-  if (fig.植生 && S.mapdata) {
+  if (fig.植生 && S.vegFC) {
     g.globalAlpha = 0.38;
-    for (const f of S.mapdata.植生図.features) {
+    for (const f of S.vegFC.features) {
       const gm = f.geometry, polys = gm.type === "Polygon" ? [gm.coordinates] : gm.coordinates;
       g.beginPath();
       let vis = false;
@@ -1074,6 +1244,7 @@ function figForm() {
   const sel = $("#fig-day"); sel.innerHTML = "";
   for (const d of days.length ? days : [today()]) sel.append(el("option", { value: d }, d));
 }
+function buildOlds() { if (!S.olds && S.bundle) S.olds = (S.bundle.olds || []).map(([n, t]) => ({ k: skey(n), n, t })); }
 async function boot() {
   await openDB();
   initMap();
@@ -1081,20 +1252,26 @@ async function boot() {
   S.bundle = mb.bundle || null; S.axes = mb.axes || {}; S.masterBit = mb.masterBit || 1;
   if (S.bundle) {
     S.byName = new Map(S.bundle.species.map((sp) => [sp[0], sp]));
-    S.olds = (S.bundle.olds || []).map(([n, t]) => ({ k: skey(n), n, t }));
+    S.olds = null; setTimeout(buildOlds, 400);   // 旧名の検索キーは 地図が出てから裏で作る（切り替えを待たせない。祝 2026-10-04）
     $("#title").textContent = "現地記録　" + S.bundle.case;
   } else { S.olds = []; toast("種名の入力画面で 業務ファイル を読み込むと、和名を索引から選べます", 4000); }
   S.usage = (await kvGet("usage")) || {};
   S.fig = { ...FIG_DEF, ...((await kvGet("fig")) || {}) };
   S.gpsModel = (await kvGet("gpsModel")) || "";
   S.fields = (await kvGet("fields:" + jobName())) || {};
-  S.points = (await allPoints()) || [];
+  // 地点は業務ごと（祝 2026-10-04）。いま開いている業務の地点だけを扱う（地図・一覧・位置図・書き出し）。
+  // 業務名の無い前の地点は、いま開いている業務のものとする（入力画面の記録と同じ考え）
+  const all = (await allPoints()) || [];
+  for (const p of all) if (!p.業務) { p.業務 = jobName(); await putPoint(p); }
+  S.points = all.filter((p) => p.業務 === jobName());
+  S.others = all.length - S.points.length;
+  S.vegSaved = (await kvGet("vegSaved")) || null;
   applyMapdata(pickMap(S.bundle && S.bundle.genchiMap, await kvGet("mapdata")));
   drawPoints();
   // 入力画面と行き来しても、最後に見ていた所に戻る（祝 2026-10-04「画面を切り替えながら作業したい」）
   const view = await kvGet("view");
   if (view && view.業務 === jobName()) map.setView([view.lat, view.lon], view.z); else fitJob();
-  map.on("moveend", () => { const c = map.getCenter(); kvSet("view", { 業務: jobName(), lat: c.lat, lon: c.lng, z: map.getZoom() }); });
+  map.on("moveend", () => { const c = map.getCenter(); kvSet("view", { 業務: jobName(), lat: c.lat, lon: c.lng, z: map.getZoom() }).catch(() => {}); });   // 頁を離れる途中は保存できないので捨てる
   $("#go-input").onclick = (e) => { if (!leaveOk()) e.preventDefault(); };
   // 種名の入力画面の 📍 から: その場で地点を測り、和名と区分を入れた入力欄を開く（入力画面で数えた印つき）
   if (location.hash === "#list") { history.replaceState(null, "", location.pathname); showTab("list"); }
@@ -1114,13 +1291,16 @@ async function boot() {
   $("#tab-list").onclick = () => showTab("list");
   $("#btn-menu").onclick = () => {
     const n = S.points.length, r = S.points.reduce((a, p) => a + p.recs.length, 0);
-    $("#rec-info").textContent = `地点 ${n}・記録 ${r}（端末の中）`;
+    $("#rec-info").textContent = `この業務（${jobName()}）: 地点 ${n}・記録 ${r}` + (S.others ? `（ほかの業務の地点 ${S.others} は隠れています。その業務の業務ファイルを読み込むと出ます）` : "");
     $("#ver").textContent = `現地記録 ${GENCHI_VERSION}（試作品）　業務ファイル: ${S.bundle ? S.bundle.case : "なし"}${S.bundle && S.bundle.genchiMap ? "（地図入り）" : ""}`;
-    figForm(); fieldsForm();
+    figForm(); fieldsForm(); storageInfo();
     $("#dlg-menu").showModal();
   };
   $("#btn-close-menu").onclick = () => $("#dlg-menu").close();
   $("#btn-cache").onclick = () => cacheArea();
+  $("#btn-cache-view").onclick = () => cacheView();
+  $("#btn-clear-tiles").onclick = () => clearTiles();
+  drawSaved((await kvGet("savedAreas")) || []);
   $("#btn-export").onclick = () => { $("#dlg-menu").close(); exportAll(); };
   $("#btn-fig").onclick = () => { $("#dlg-menu").close(); showFigure($("#fig-day").value, null); };
   $("#fig-close").onclick = () => $("#dlg-fig").close();
@@ -1139,8 +1319,21 @@ async function boot() {
     } catch (err) { toast("読み込めませんでした: " + (err.message || err)); }
     e.target.value = "";
   };
-  if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost" || location.hostname === "127.0.0.1")) navigator.serviceWorker.register("./sw.js").catch(() => {});
+  if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost" || location.hostname === "127.0.0.1")) {
+    navigator.serviceWorker.register("./sw.js").catch(() => {});
+    // 新しい版が裏で入ったら 上に知らせる。押すまで読み直さない（入力の途中で画面を変えない。祝 2026-10-04）
+    const hadCtl = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (!hadCtl || document.getElementById("new-ver")) return;
+      const d = document.createElement("div"); d.id = "new-ver";
+      d.textContent = "新しい版があります（押すと切り替え）";
+      const hd = document.querySelector("header");   // 上のタブ（入力｜地図｜一覧）にかぶせない
+      d.style.cssText = "position:fixed;left:8px;right:8px;top:" + ((hd ? hd.getBoundingClientRect().bottom : 0) + 4) + "px;z-index:5000;background:#1565c0;color:#fff;padding:8px 10px;border-radius:6px;text-align:center;font-size:15px;box-shadow:0 2px 6px rgba(0,0,0,.3)";
+      d.onclick = () => location.reload();
+      document.body.append(d);
+    });
+  }
 }
-window.__genchi = { S, newPoint, openPoint, exportAll, vegAt, drawFigure, whereIs, shapefile };
+window.__genchi = { S, newPoint, openPoint, exportAll, vegAt, drawFigure, whereIs, shapefile, map: () => map };
 boot();
 })();
