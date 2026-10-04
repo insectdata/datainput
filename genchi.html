@@ -113,6 +113,7 @@ dialog label.chk input{width:20px;height:20px;margin:0}
 <div class="tools" id="tools">
   <button id="t-layer">写真</button>
   <button id="t-veg" class="on">植生</button>
+  <button id="t-geo" title="産総研の 20 万分の 1 シームレス地質図（粗い参考）">地質</button>
   <button id="t-gps">現在地</button>
   <button id="t-fit">範囲</button>
   <button id="t-day">今日だけ</button>
@@ -140,9 +141,10 @@ dialog label.chk input{width:20px;height:20px;margin:0}
     <label>地図</label><select id="view-kind"><option>両方</option><option>標準地図</option><option>航空写真</option></select>
     <label>拡大</label><select id="view-depth"><option value="2">いまの縮尺から 2 段（おすすめ）</option><option value="3">3 段</option><option value="4">4 段（枚数が多い）</option><option value="1">1 段</option><option value="0">いまの縮尺だけ</option></select>
     <label>植生図</label><label class="chk"><input type="checkbox" id="view-veg" checked> 環境省の植生図も（縮尺 15 まで）</label>
+    <label>地質図</label><label class="chk"><input type="checkbox" id="view-geo" checked> 産総研の地質図も（縮尺 13 まで。枚数は少ない）</label>
   </div>
   <button class="btn sec" id="btn-cache-view">いま画面に出ている範囲を保存</button>
-  <small class="hint" id="view-info">調査地で初めて地図を見るときに。電波のあるうちに、記録したい範囲を画面に出して押します。保存した範囲は地図に紫の点線の枠で出ます。「植生図も」にすると、環境省の植生図（ジオポータル）を形と凡例名つきで保存し、凡例名を引く・環境の札・位置図に使えます（業務ファイルの植生図があればそちらが先）。あわせて植生図の画像（タイル）も保存します。画像は端末の使用量が大きめに数えられるので、範囲を絞って。</small>
+  <small class="hint" id="view-info">調査地で初めて地図を見るときに。電波のあるうちに、記録したい範囲を画面に出して押します。保存した範囲は地図に紫の点線の枠で出ます。「植生図も」にすると、環境省の植生図（ジオポータル）を形と凡例名つきで保存し、凡例名を引く・環境の札・位置図に使えます（業務ファイルの植生図があればそちらが先）。あわせて植生図の画像（タイル）も保存します。画像は端末の使用量が大きめに数えられるので、範囲を絞って。「地質図も」にすると、圏外でも地質図を見られ、地点の地質も引けます。</small>
   <small class="hint" id="storage-info"></small>
   <button class="btn warn" id="btn-clear-tiles">貯めた地図をすべて消す</button>
   <h4>入力欄に出す項目（この業務）</h4>

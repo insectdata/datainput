@@ -1,7 +1,7 @@
 /* 画面のファイルを端末に保持して、圏外でも開けるようにする。
  * 業務ファイル（スマホ用.json）はここでは扱わない。あれは IndexedDB に入る。
  * 画面を更新したら VERSION を上げる。 */
-const VERSION = "konchu-input-v45";
+const VERSION = "konchu-input-v46";
 const TILES = "gsi-tiles";   // 地理院の地図（現地記録の画面で貯める）。版を上げても消さない
 const SHELL = ["./", "./index.html", "./app.js", "./manifest.webmanifest", "./icon.svg", "./icon-180.png", "./icon-192.png", "./icon-512.png",
   "./genchi.html", "./genchi.js", "./draw.html", "./draw.js", "./lib/leaflet/leaflet.js", "./lib/leaflet/leaflet.css"];
@@ -34,7 +34,8 @@ self.addEventListener("fetch", (e) => {
     }));
     return;
   }
-  if (url.hostname === "cyberjapandata.gsi.go.jp") {
+  // 産総研の地質図の画像（凡例の Web API は貯めない。圏外は画面が貯めた画像の色から引く）
+  if (url.hostname === "cyberjapandata.gsi.go.jp" || (url.hostname === "gbank.gsj.jp" && url.pathname.includes("/tiles/"))) {
     e.respondWith(caches.open(TILES).then(async (c) => {
       const hit = await c.match(e.request.url);
       if (hit) return hit;

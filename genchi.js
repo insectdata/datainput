@@ -2,7 +2,7 @@
  * 設計: 設計\現地記録の画面（写真・GPS・位置図）_2026-10-02.txt
  *   地点 … 位置は地点ごとに 1 度だけ測る（測り直す・位置を動かす・消す）。1 地点に記録と写真をいくつでも
  *   記録 … 区分（重要種・確認種・環境）・和名・個体数・方法・環境・確認された植物・メモ・写真
- *   地図 … 地理院（標準・航空写真）＋ 植生図 ＋ 業務の地図 ＋ 地点 ＋ 現在地。トラックは扱わない（ガーミンで取る）
+ *   地図 … 地理院（標準・航空写真）＋ 植生図 ＋ 地質図（産総研。g19）＋ 業務の地図 ＋ 地点 ＋ 現在地。トラックは扱わない（ガーミンで取る）
  *          業務の地図は 業務ファイル（スマホ用.json）の genchiMap（業務フォルダの「地図」フォルダから作る）か、
  *          ☰ で読み込む ○○_現地記録用の地図.json（新しい方を使う）
  *   和名の索引は 種名の入力画面で読み込んだ業務ファイル（端末の konchu-input に入っている）を読むだけ
@@ -11,7 +11,7 @@
  */
 (() => {
 "use strict";
-const GENCHI_VERSION = "g18";
+const GENCHI_VERSION = "g19";
 const $ = (s) => document.querySelector(s);
 const el = (t, attrs = {}, ...kids) => {
   const e = document.createElement(t);
@@ -182,8 +182,14 @@ const ATTR = '<a href="https://maps.gsi.go.jp/development/ichiran.html" target="
 // 業務の地図に植生図が無いときに重ねる。画像なので凡例名は引けず、位置図にも描けない（そちらは業務ファイルの植生図）
 const VEG_TILE = "https://www.biodic.go.jp/kiso/vg/tile/veg2024raster/{z}/{x}/{y}.png";
 const VEG_ATTR = '植生: <a href="https://www.biodic.go.jp/" target="_blank">環境省生物多様性センター</a> 現存植生図2024';
-const TILES = { ...GSI, 植生図: VEG_TILE };
-let vegTiles = null;
+// 産総研 地質調査総合センター 20万分の1日本シームレス地質図V2（政府標準利用規約 2.0。出典を書けば使える。縮尺 13 まで）。
+// 植物の調査の参考（祝 2026-10-04「荒い情報でも構わない」）。地点の地質は凡例の Web API で引き、圏外は貯めた「地質の色」の画像の色から引く
+const GEO_API = "https://gbank.gsj.jp/seamless/v2/api/1.2/";
+const GEO_TILE = GEO_API + "tiles/{z}/{y}/{x}.png";            // 地質＋境界＋断層＋記号（見る用）
+const GEO_PICK = GEO_API + "tiles/{z}/{y}/{x}.png?layer=g";    // 地質の色だけ（圏外で地点の色を読む用）
+const GEO_ATTR = '地質: <a href="https://gbank.gsj.jp/seamless/" target="_blank">産総研地質調査総合センター</a> シームレス地質図V2';
+const TILES = { ...GSI, 植生図: VEG_TILE, 地質図: GEO_TILE, 地質の色: GEO_PICK };
+let vegTiles = null, geoTiles = null;
 const vegNow = () => vegLayer || vegTiles;     // いま使う植生（業務ファイルの植生図が先）
 function vegColor(p) {
   const n = p.凡例名 || "";
@@ -214,6 +220,17 @@ function initMap() {
     $("#t-veg").classList.toggle("on", !on);
     if (!on && v === vegTiles) toast("環境省の植生図（タイル）を重ねました。凡例名は業務ファイルの植生図があるときだけ引けます", 3500);
   };
+  geoTiles = L.tileLayer(GEO_TILE, { maxNativeZoom: 13, maxZoom: 20, opacity: 0.55, attribution: GEO_ATTR });
+  S.setGeo = (on) => {
+    if (on) geoTiles.addTo(map); else map.removeLayer(geoTiles);
+    $("#t-geo").classList.toggle("on", on); kvSet("geoOn", on);
+  };
+  $("#t-geo").onclick = () => {
+    const on = !map.hasLayer(geoTiles); S.setGeo(on);
+    if (on) toast("産総研の地質図（20 万分の 1。粗い参考）を重ねました。地図を押すとその所の地質が出ます", 3500);
+  };
+  // 植生図・地質図を出しているとき、地図を押すとその所の凡例（植生図のポリゴンを押したときは そちらの手前で出す）
+  map.on("click", (e) => { if (!S.moving && map.hasLayer(geoTiles)) infoPopup(e.latlng, null); });
   $("#t-gps").onclick = () => setFollow(!S.follow);
   $("#t-fit").onclick = () => fitJob();
   $("#t-day").onclick = () => { S.allDays = !S.allDays; $("#t-day").textContent = S.allDays ? "全部の日" : "今日だけ"; drawPoints(); };
@@ -241,9 +258,9 @@ function applyMapdata(md) {
   if (S.vegFC) vegLayer = L.geoJSON(S.vegFC, {
     style: (f) => ({ color: "#555", weight: 0.5, fillColor: vegColor(f.properties), fillOpacity: 0.35 }),
     onEachFeature: (f, ly) => ly.on("click", (e) => {
+      L.DomEvent.stopPropagation(e);      // 地図の click（地質だけの吹き出し）を重ねて出さない
       if (S.moving) return;
-      const p = f.properties, pl = ((md && md.凡例の植物) || {})[String(p.凡例コード)];
-      L.popup().setLatLng(e.latlng).setContent(`<b>${p.凡例名}</b>` + (pl ? `<br>主な植物（調査地点 ${pl.調査地点数}）: ${pl.植物.slice(0, 6).map((x) => `${x[0]}(${Math.round(x[1])}%)`).join("・")}` : "<br>調査の地点なし")).openOn(map);
+      infoPopup(e.latlng, f.properties);
     }),
   });
   if ($("#t-veg").classList.contains("on")) (vegLayer || vegTiles).addTo(map);
@@ -264,6 +281,60 @@ function vegAt(lat, lon) {
     for (const pg of polys) if (inRing(lon, lat, pg[0]) && !pg.slice(1).some((h) => inRing(lon, lat, h))) return f.properties;
   }
   return null;
+}
+// 吹き出し: 植生図の凡例（押したポリゴン）＋ 地質図を出していればその所の地質
+function infoPopup(ll, vp) {
+  let html = "";
+  if (vp) {
+    const pl = ((S.mapdata && S.mapdata.凡例の植物) || {})[String(vp.凡例コード)];
+    html = `<b>${vp.凡例名}</b>` + (pl ? `<br>主な植物（調査地点 ${pl.調査地点数}）: ${pl.植物.slice(0, 6).map((x) => `${x[0]}(${Math.round(x[1])}%)`).join("・")}` : "<br>調査の地点なし");
+  }
+  const geoOn = geoTiles && map.hasLayer(geoTiles);
+  if (!html && !geoOn) return;
+  const pop = L.popup({ maxWidth: 280 }).setLatLng(ll).setContent(html + (geoOn ? (html ? "<br>" : "") + "地質: 調べています…" : "")).openOn(map);
+  if (geoOn) geoAt(ll.lat, ll.lng).then((g) => pop.setContent(html + (html ? "<br>" : "") + geoHtml(g)));
+}
+function geoHtml(g) {
+  if (!g) return "地質: 分かりません（電波が無く、この所の地質図を保存していない）";
+  if (g.外) return "地質: 地質図の外（海・湖など）";
+  return `地質: <b>${g.岩相}</b><br><small>${g.大区分}・${g.時代}${g.圏外 ? "（保存した地質図の色から）" : ""}<br>20 万分の 1 の粗い参考</small>`;
+}
+// その所の地質（産総研 シームレス地質図V2）。電波があれば凡例の Web API、無ければ貯めた「地質の色」の画像（縮尺 13）の色を保存した凡例と照らす
+const geoOf = (d) => ({ 記号: d.symbol || "", 時代: d.formationAge_ja || "", 大区分: d.group_ja || "", 岩相: d.lithology_ja || "" });
+function rememberGeo(list) {
+  S.geoLegends = S.geoLegends || {};
+  let n = 0;
+  for (const d of list) if (d && d.symbol) { const k = `${d.r},${d.g},${d.b}`; if (!S.geoLegends[k]) n++; S.geoLegends[k] = geoOf(d); }
+  if (n) kvSet("geoLegends", S.geoLegends).catch(() => {});
+  return n;
+}
+async function geoAt(lat, lon) {
+  try {
+    const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), 5000);
+    const r = await fetch(`${GEO_API}legend.json?point=${lat.toFixed(6)},${lon.toFixed(6)}`, { signal: ctl.signal });
+    clearTimeout(t);
+    if (r.ok) { const d = await r.json(); if (d && d.symbol) { rememberGeo([d]); return geoOf(d); } return { 外: true }; }
+  } catch (e) { /* 圏外 → 下で貯めた画像から */ }
+  try {
+    const [px, py] = wpx(lon, lat, 13), tx = Math.floor(px / 256), ty = Math.floor(py / 256);
+    const hit = await (await caches.open("gsi-tiles")).match(GEO_PICK.replace("{z}", 13).replace("{x}", tx).replace("{y}", ty));
+    if (!hit) return null;
+    const bm = await createImageBitmap(await hit.blob()), cv = document.createElement("canvas");
+    cv.width = cv.height = 256;
+    const g = cv.getContext("2d"); g.drawImage(bm, 0, 0);
+    const d = g.getImageData(Math.floor(px) - tx * 256, Math.floor(py) - ty * 256, 1, 1).data;
+    if (d[3] < 128) return { 外: true };
+    const leg = (S.geoLegends || {})[`${d[0]},${d[1]},${d[2]}`];
+    return leg ? { ...leg, 圏外: true } : null;
+  } catch (e) { return null; }
+}
+// 地点に地質を付ける（地点を作った・動かした・測り直したとき。取れなければ次に開いたときにまた）
+async function fillGeo(p) {
+  const g = await geoAt(p.lat, p.lon);
+  if (!g) return;
+  p.geo = g.外 ? "" : g.岩相; p.geo時代 = g.外 ? "" : g.時代; p.geo区分 = g.外 ? "" : g.大区分;
+  await putPoint(p);
+  if (S.cur === p && $("#pt-meta")) $("#pt-meta").textContent = metaText(p);
 }
 function vegNear(lat, lon) {
   const out = [], d = 40 / 111000;
@@ -344,7 +415,7 @@ function drawPoints() {
       const ll = m.getLatLng();
       p.lat = ll.lat; p.lon = ll.lng; p.moved = (p.moved || 0) + 1; p.how = "手で置いた";
       p.veg = (vegAt(p.lat, p.lon) || {}).凡例名 || "";
-      await putPoint(p); toast(`地点 ${p.no} の位置を直しました`); openPoint(p);
+      await putPoint(p); toast(`地点 ${p.no} の位置を直しました`); openPoint(p); fillGeo(p);
     });
     ptLayer.addLayer(m);
   }
@@ -366,6 +437,7 @@ async function newPoint(preset, atCross) {
     veg: (vegAt(lat, lon) || {}).凡例名 || "", recs: [] };
   p.id = await putPoint(p);
   S.points.push(p);
+  fillGeo(p);
   drawPoints();
   map.setView([lat, lon], Math.max(map.getZoom(), 17));
   if (preset) openForm(p, -1, preset); else openPoint(p, true);
@@ -385,8 +457,8 @@ function openPoint(p, startForm) {
   const head = el("h3", {}, el("span", { class: "num", style: `background:${ptColor(p)}` }, p.no), `地点 ${p.no}`,
     el("small", { style: "font-weight:400;color:var(--muted)" }, `${p.day} ${hm(new Date(p.time))}`),
     el("button", { class: "x", onclick: closePanel, "aria-label": "閉じる" }, "×"));
-  const meta = el("div", { class: "meta" }, `${p.lat.toFixed(6)}, ${p.lon.toFixed(6)}　${p.acc != null ? "誤差 " + p.acc + " m" : p.how}` +
-    (p.moved ? "（手で直した）" : "") + (p.veg ? `　植生: ${p.veg}` : "") + (w.範囲 ? `　${w.範囲}` : "") + (w.近く ? `　${w.近く}` : ""));
+  const meta = el("div", { class: "meta", id: "pt-meta" }, metaText(p));
+  if (p.geo === undefined) fillGeo(p);      // まだ地質を引けていない地点（圏外で作った など）
   const tools = el("div", { class: "row" },
     el("button", { class: "btn sec small", onclick: () => remeasure(p) }, "測り直す"),
     el("button", { class: "btn sec small", onclick: () => toggleMove(p) }, S.moving ? "位置を決めた" : "位置を動かす"),
@@ -428,6 +500,11 @@ function openPoint(p, startForm) {
   pan.style.display = "block";
   if (startForm) openForm(p, -1);
 }
+function metaText(p) {
+  const w = whereIs(p.lat, p.lon);
+  return `${p.lat.toFixed(6)}, ${p.lon.toFixed(6)}　${p.acc != null ? "誤差 " + p.acc + " m" : p.how}` +
+    (p.moved ? "（手で直した）" : "") + (p.veg ? `　植生: ${p.veg}` : "") + (p.geo ? `　地質: ${p.geo}` : "") + (w.範囲 ? `　${w.範囲}` : "") + (w.近く ? `　${w.近く}` : "");
+}
 function closePanel() {
   if (!leaveOk()) return;
   $("#panel").style.display = "none"; S.cur = null;
@@ -439,7 +516,7 @@ async function remeasure(p) {
   if (!pos) return toast("位置が取れませんでした");
   p.lat = pos.coords.latitude; p.lon = pos.coords.longitude; p.acc = Math.round(pos.coords.accuracy); p.how = "GPS（測り直し）";
   p.veg = (vegAt(p.lat, p.lon) || {}).凡例名 || "";
-  await putPoint(p); drawPoints(); map.panTo([p.lat, p.lon]); openPoint(p); toast(`地点 ${p.no} を測り直しました（誤差 ${p.acc} m）`);
+  await putPoint(p); drawPoints(); map.panTo([p.lat, p.lon]); openPoint(p); fillGeo(p); toast(`地点 ${p.no} を測り直しました（誤差 ${p.acc} m）`);
 }
 function toggleMove(p) {
   S.moving = !S.moving;
@@ -771,7 +848,13 @@ function tileUrls(b, z0, z1, kinds) {
   const urls = [];
   for (let z = z0; z <= z1; z++) {
     const [x0, y1] = tileXY(b[0], b[1], z), [x1, y0] = tileXY(b[2], b[3], z);
-    for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) for (const k of kinds) if (k !== "植生図" || z <= 15) urls.push(TILES[k].replace("{z}", z).replace("{x}", x).replace("{y}", y));
+    for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) for (const k of kinds) if (!k.startsWith("地質") && (k !== "植生図" || z <= 15)) urls.push(TILES[k].replace("{z}", z).replace("{x}", x).replace("{y}", y));
+  }
+  // 地質図は縮尺 13 まで（それより拡大すると 13 の画像を引き伸ばして出す）。いまの縮尺の 1 段上から 13 まで
+  const geo = kinds.filter((k) => k.startsWith("地質"));
+  if (geo.length) for (let z = Math.max(10, Math.min(z0, 13) - 1); z <= 13; z++) {
+    const [x0, y1] = tileXY(b[0], b[1], z), [x1, y0] = tileXY(b[2], b[3], z);
+    for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) for (const k of geo) urls.push(TILES[k].replace("{z}", z).replace("{x}", x).replace("{y}", y));
   }
   return urls;
 }
@@ -798,18 +881,21 @@ async function saveTiles(b, z0, z1, kinds, label, info) {
 async function cacheArea() {
   const b = S.mapdata && S.mapdata.範囲;
   if (!b) return toast("業務の地図が入っていません。地図を動かして「いま画面に出ている範囲を保存」を使ってください", 5000);
-  await saveTiles(b, 13, 18, ["標準地図", "航空写真"], S.mapdata.業務 + " の範囲", $("#cache-info"));
+  const geo = $("#view-geo").checked;
+  await saveTiles(b, 13, 18, ["標準地図", "航空写真"].concat(geo ? ["地質図", "地質の色"] : []), S.mapdata.業務 + " の範囲", $("#cache-info"));
+  if (geo) await saveGeo(b, $("#cache-info"));
 }
 // いま画面に出ている範囲を保存（業務の地図が無い調査地でも。電波のあるうちに下準備。祝 2026-10-04）
 async function cacheView() {
   const bd = map.getBounds(), b = [bd.getWest(), bd.getSouth(), bd.getEast(), bd.getNorth()];
   const z0 = Math.max(10, Math.min(map.getZoom(), 18)), z1 = Math.min(18, Math.max(z0, z0 + parseInt($("#view-depth").value, 10)));
-  const kinds = ($("#view-kind").value === "両方" ? ["標準地図", "航空写真"] : [$("#view-kind").value]).concat($("#view-veg").checked ? ["植生図"] : []);
+  const kinds = ($("#view-kind").value === "両方" ? ["標準地図", "航空写真"] : [$("#view-kind").value]).concat($("#view-veg").checked ? ["植生図"] : []).concat($("#view-geo").checked ? ["地質図", "地質の色"] : []);
   $("#dlg-menu").close();
   toast("この範囲を貯めます（終わるまで画面を開いたままに）", 4000);
   await saveTiles(b, z0, z1, kinds, `${ymd()} の保存`, $("#view-info"));
   let msg = $("#view-info").textContent;
   if ($("#view-veg").checked) { const n = await saveVeg(b, $("#view-info")); if (n) msg += `　植生図 ${n} ポリゴンも保存（凡例名つき）`; $("#view-info").textContent = msg; }
+  if ($("#view-geo").checked) { const n = await saveGeo(b, $("#view-info")); if (n != null) msg += `　地質の凡例 ${n} も保存`; $("#view-info").textContent = msg; }
   toast(msg, 5000);
 }
 // 環境省ジオポータル（ArcGIS。現存植生図2024 全国 8 ブロック。CC-BY 4.0）から 範囲の植生図を 形と凡例名つきで取る（祝 2026-10-04）
@@ -842,6 +928,16 @@ async function saveVeg(b, info) {
   applyMapdata(S.mapdata);
   if (got.over) toast("植生図が多すぎて一部しか取れませんでした。拡大して範囲を狭めてください", 5000);
   return got.features.length;
+}
+// 範囲の地質の凡例（色 → 岩相・時代）を保存する。圏外で地点の地質を 貯めた画像の色から引くため
+async function saveGeo(b, info) {
+  try {
+    const d = 0.003, bb = [Math.min(b[1], b[3] - d), Math.min(b[0], b[2] - d), Math.max(b[3], b[1] + d), Math.max(b[2], b[0] + d)];   // 範囲が 0 だと 500 になる
+    const r = await fetch(`${GEO_API}legend.json?box=${bb.map((v) => v.toFixed(6)).join(",")}`);   // 桁が長いと空で返る
+    const list = await r.json();
+    rememberGeo(Array.isArray(list) ? list : [list]);
+    return Array.isArray(list) ? list.length : 1;
+  } catch (e) { info.textContent += "（地質の凡例を取れませんでした）"; return null; }
 }
 let savedLayer = null;
 function drawSaved(areas) {
@@ -1154,7 +1250,7 @@ async function exportAll() {
     const w = whereIs(p.lat, p.lon);
     const names = p.recs.map((r) => r.和名 || r.環境 || r.区分).filter(Boolean);
     gpx += `<wpt lat="${p.lat.toFixed(7)}" lon="${p.lon.toFixed(7)}">${p.alt != null ? `<ele>${p.alt}</ele>` : ""}<time>${new Date(p.time).toISOString()}</time><name>${xml(`${p.day.slice(5)} ${p.no} ${names.slice(0, 2).join("・")}`)}</name><desc>${xml(names.join("、"))}</desc></wpt>\n`;
-    feats.push({ type: "Feature", properties: { 日: p.day, 地点: p.no, 植生: p.veg, 範囲: w.範囲 || "", 記録: names.join("、") }, geometry: { type: "Point", coordinates: [+p.lon.toFixed(7), +p.lat.toFixed(7)] } });
+    feats.push({ type: "Feature", properties: { 日: p.day, 地点: p.no, 植生: p.veg, 地質: p.geo || "", 範囲: w.範囲 || "", 記録: names.join("、") }, geometry: { type: "Point", coordinates: [+p.lon.toFixed(7), +p.lat.toFixed(7)] } });
     const recs = p.recs.length ? p.recs : [{ 区分: "", photos: [] }];
     let k = 0;
     for (const r of recs) {
@@ -1168,9 +1264,9 @@ async function exportAll() {
       const rank = marksOf(r.和名).map((m) => m.full).join("、");
       rows.push([p.day, p.no, r.区分 || "", r.和名 || "", sp ? sp[1] : "", sp ? sp[2] : "", rank, r.個体数 || "", r.状態 || "", r.方法 || "", r.メモ || "", r.環境 || "", r.植物 || "",
         +p.lat.toFixed(7), +p.lon.toFixed(7), p.acc != null ? p.acc : "", p.how + (p.moved ? "（手で直した）" : ""), hm(new Date(p.time)),
-        r.季節 || "", r.調査地点 || "", p.veg || "", w.範囲 || "", w.近く || "", phNames.join("、"), r.カメラ番号 || "", p.gps番号 || "", p.gps機種 || "", r.数え済み ? "○" : ""]);
+        r.季節 || "", r.調査地点 || "", p.veg || "", p.geo || "", p.geo時代 || "", w.範囲 || "", w.近く || "", phNames.join("、"), r.カメラ番号 || "", p.gps番号 || "", p.gps機種 || "", r.数え済み ? "○" : ""]);
       shpRows.push({ lat: p.lat, lon: p.lon, values: { 日: p.day, 地点: p.no, 区分: r.区分 || "", 和名: r.和名 || "", 学名: sp ? sp[1] : "", 科: sp ? sp[2] : "", 重要種: rank,
-        個体数: r.個体数 || "", 状態: r.状態 || "", 方法: r.方法 || "", 環境: r.環境 || "", 植物: r.植物 || "", メモ: r.メモ || "", 誤差: p.acc, 植生: p.veg || "", 範囲: w.範囲 || "", 写真: phNames.join("、"),
+        個体数: r.個体数 || "", 状態: r.状態 || "", 方法: r.方法 || "", 環境: r.環境 || "", 植物: r.植物 || "", メモ: r.メモ || "", 誤差: p.acc, 植生: p.veg || "", 地質: p.geo || "", 範囲: w.範囲 || "", 写真: phNames.join("、"),
         カメラ: r.カメラ番号 || "", GPS番号: p.gps番号 || "", GPS機種: p.gps機種 || "" } });
       if (r.和名 && (r.区分 === "重要種" || r.区分 === "確認種") && !r.数え済み) input.push([r.和名, parseInt(r.個体数, 10) || 1, r.方法 || "", r.調査地点 || "", r.その他 || "", r.季節 || "",
         [r.状態, r.メモ, `現地記録 地点${p.no}`].filter(Boolean).join(" "), p.day]);
@@ -1179,7 +1275,7 @@ async function exportAll() {
   gpx += "</gpx>\n";
   const shp = shapefile(shpRows, [["日", "C", 10], ["地点", "N", 4], ["区分", "C", 9], ["和名", "C", 90], ["学名", "C", 90], ["科", "C", 45],
     ["重要種", "C", 150], ["個体数", "C", 30], ["状態", "C", 60], ["方法", "C", 45], ["環境", "C", 200], ["植物", "C", 200], ["メモ", "C", 254], ["誤差", "N", 6],
-    ["植生", "C", 90], ["範囲", "C", 60], ["写真", "C", 254], ["カメラ", "C", 60], ["GPS番号", "C", 20], ["GPS機種", "C", 40]]);
+    ["植生", "C", 90], ["地質", "C", 120], ["範囲", "C", 60], ["写真", "C", 254], ["カメラ", "C", 60], ["GPS番号", "C", 20], ["GPS機種", "C", 40]]);
   for (const [ext, data] of shp) files.push([`シェープファイル/現地記録_地点.${ext}`, data]);
   // 位置図（日ごとの全体図と、地点ごとの拡大図）
   const days = [...new Set(pts.map((p) => p.day))];
@@ -1193,19 +1289,20 @@ async function exportAll() {
   }
   files.unshift(
     ["地点の一覧.xlsx", xlsx("地点の一覧", ["日", "地点", "区分", "和名", "学名", "科", "重要種・外来種", "個体数", "確認したもの", "方法", "メモ", "生息環境", "周囲の植物",
-      "緯度", "経度", "誤差m", "位置の取り方", "時刻", "季節", "調査地点", "植生図の凡例", "範囲", "近くの調査地点", "写真", "デジカメの画像番号", "GPS のプロット番号", "使った GPS", "入力画面で数えた"], rows)],
+      "緯度", "経度", "誤差m", "位置の取り方", "時刻", "季節", "調査地点", "植生図の凡例", "地質（20万分の1）", "地質の時代", "範囲", "近くの調査地点", "写真", "デジカメの画像番号", "GPS のプロット番号", "使った GPS", "入力画面で数えた"], rows)],
     ["入力データ.xlsx", xlsx("入力データ", ["和名", "個体数", "採集方法", "地点", "その他", "季節", "備考", "採集日"], input)],
     ["地点.gpx", enc.encode(gpx)],
     ["地点.geojson", enc.encode(JSON.stringify({ type: "FeatureCollection", features: feats }))],
     ["説明.txt", enc.encode([`現地記録の書き出し（${job}、${new Date().toLocaleString()}）`,
-      "地点の一覧.xlsx … 記録ごとの行（位置・植生図の凡例・範囲の中か外か・写真の名前）",
+      "地点の一覧.xlsx … 記録ごとの行（位置・植生図の凡例・地質・範囲の中か外か・写真の名前）",
+      "                 地質は 産総研の 20 万分の 1 シームレス地質図。植物の調査の粗い参考（数十 m の境目はずれることがある）",
       "入力データ.xlsx … 業務の 入力 フォルダに置くと 1_入力データをまとめる で集計に入る（7 列＋採集日。重要種・確認種の記録。",
       "                 種名の入力画面で数えた記録（📍から来た・地点の一覧の「入力画面で数えた」○）は二重にならないよう入れていない）",
       "シェープファイル … 現地記録_地点（点。WGS84。日本語は UTF-8、.cpg 付き。QGIS・ArcGIS で開ける）",
       "地点.gpx … ガーミンなどに入れられる。地点.geojson … QGIS などで開ける",
       "位置図 … A4 縦（150 dpi）。日ごとの全体図と、地点ごとの拡大図（写真と同じ 日付_地点 の名前）",
       "写真 … 長辺 1600。名前は 日付_地点_番号_和名",
-      `背景の地図の出典: 国土地理院。植生: 環境省 現存植生図2024`].join("\r\n") + "\r\n")]);
+      `背景の地図の出典: 国土地理院。植生: 環境省 現存植生図2024。地質: 産総研地質調査総合センター 20万分の1日本シームレス地質図V2`].join("\r\n") + "\r\n")]);
   const name = `${job}_現地記録_${stamp()}.zip`;
   const blob = new Blob([zipStore(files)], { type: "application/zip" });
   const file = new File([blob], name, { type: "application/zip" });
@@ -1266,6 +1363,7 @@ async function boot() {
   S.points = all.filter((p) => p.業務 === jobName());
   S.others = all.length - S.points.length;
   S.vegSaved = (await kvGet("vegSaved")) || null;
+  S.geoLegends = (await kvGet("geoLegends")) || {};
   applyMapdata(pickMap(S.bundle && S.bundle.genchiMap, await kvGet("mapdata")));
   drawPoints();
   // 入力画面と行き来しても、最後に見ていた所に戻る（祝 2026-10-04「画面を切り替えながら作業したい」）
@@ -1287,6 +1385,7 @@ async function boot() {
   $("#btn-here").onclick = () => newPoint();
   $("#btn-cross").onclick = () => newPoint(null, true);
   if (await kvGet("cross")) S.setCross(true);
+  if (await kvGet("geoOn")) S.setGeo(true);
   $("#tab-map").onclick = () => showTab("map");
   $("#tab-list").onclick = () => showTab("list");
   $("#btn-menu").onclick = () => {
