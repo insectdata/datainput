@@ -40,6 +40,17 @@ body.cross #cross{display:block}
 .tools button.on{background:var(--accent);color:#fff}
 #panel{position:fixed;z-index:1001;left:0;right:0;bottom:0;max-height:72vh;overflow-y:auto;background:var(--paper);border-top:2px solid var(--accent);border-radius:12px 12px 0 0;box-shadow:0 -2px 10px rgba(0,0,0,.25);padding:6px 8px calc(8px + env(safe-area-inset-bottom));display:none}
 #panel h3{margin:0;font-size:16px;display:flex;align-items:center;gap:6px}
+#panel.big{z-index:1500}
+#panel .formbar{position:sticky;top:-6px;z-index:5;display:flex;gap:6px;align-items:center;flex-wrap:wrap;background:var(--paper);margin:0 -8px 4px;padding:6px 8px;border-bottom:1px solid var(--line);box-shadow:0 2px 4px rgba(0,0,0,.08)}
+#panel .formbar .big-tog{margin-left:auto}
+#panel .hint-box{display:flex;flex-wrap:wrap;gap:4px;margin:2px 0}
+#panel .lblrow{display:flex;align-items:flex-end;justify-content:space-between;gap:6px;margin-top:4px}
+#panel .lblrow label{margin:0;flex:1;min-width:0}
+#panel .lblrow .cam{flex:none;white-space:nowrap}
+#panel label.horyu{display:flex;gap:6px;align-items:center;color:#8a3b00;font-size:13px;font-weight:600;margin:2px 0}
+#panel label.horyu input{width:20px;height:20px;margin:0}
+#panel .hint-box:empty{display:none}
+#panel .hint-box button{font-size:14px;padding:3px 8px;border:1px dashed #1a4d99;background:#eef3fb;color:#1a4d99;border-radius:6px}
 #panel h3 .x{margin-left:auto;border:0;background:none;font-size:22px;color:var(--muted)}
 .meta{font-size:12px;color:var(--muted);margin:2px 0}
 .row{display:flex;gap:6px;flex-wrap:wrap;margin:4px 0}
@@ -50,6 +61,14 @@ body.cross #cross{display:block}
 .recs{list-style:none;margin:4px 0;padding:0}
 .recs li{border:1px solid var(--line);border-radius:6px;padding:4px 6px;margin:3px 0;display:flex;gap:6px;align-items:center}
 .recs li .t{flex:1}
+.recs li{flex-wrap:wrap}
+.recs li .t .nm{font-weight:600}
+.recs li .t .ln{font-size:13px;line-height:1.35;color:var(--ink)}
+.recs li .t .ln b{display:inline-block;min-width:4.6em;font-weight:400;color:var(--muted);margin-right:4px}
+.recs li .thumbs{flex-basis:100%}
+.recs li > .row{flex-basis:100%}
+#panel details.pt-where{margin:4px 0;font-size:13px}
+#panel details.pt-where summary{color:var(--muted);cursor:pointer}
 .kb{display:inline-block;font-size:11px;border-radius:4px;padding:0 5px;color:#fff;margin-right:4px;vertical-align:middle}
 .kb.重要種{background:var(--rdb)}.kb.確認種{background:var(--sp)}.kb.環境{background:var(--env)}.kb.要確認{background:#ef6c00}
 .thumbs{display:flex;gap:4px;flex-wrap:wrap}

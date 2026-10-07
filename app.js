@@ -7,7 +7,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "v50";   // 画面の版（sw.js の VERSION と合わせる。☰ に出す）
+const APP_VERSION = "v57";   // 画面の版（sw.js の VERSION と合わせる。☰ に出す）
 const AXES = ["季節", "採集方法", "地点", "その他"];
 const COLS = ["和名", "個体数", "採集方法", "地点", "その他", "季節", "備考", "採集日"];
 const $ = (s) => document.querySelector(s);
@@ -138,6 +138,7 @@ async function applyBundle(b) {
   $("#title").textContent = b.case || "昆虫調査 入力";
   // 前回の調査設定の選択を復元
   S.axes = (await kvGet("axes")) || {};
+  await loadGenchi();
   buildAxisSelects();
   renderMasterSelect();
   showMain(true);
@@ -249,6 +250,24 @@ function kenTen(w) {
   for (const k of S.ken) { const d = +v[S.kenIdx.get(k)] || 0; if (d > m) m = d; }
   return m;
 }
+// 地方（選んだ県が属する地方でも 記録の有無を見る。沖縄は 九州と分ける。祝 2026-10-07）
+const CHIHOU = {
+  北海道: ["北海道"], 東北: ["青森県", "岩手県", "宮城県", "秋田県", "山形県", "福島県"],
+  関東: ["茨城県", "栃木県", "群馬県", "埼玉県", "千葉県", "東京都", "神奈川県"],
+  中部: ["新潟県", "富山県", "石川県", "福井県", "山梨県", "長野県", "岐阜県", "静岡県", "愛知県"],
+  近畿: ["三重県", "滋賀県", "京都府", "大阪府", "兵庫県", "奈良県", "和歌山県"],
+  中国: ["鳥取県", "島根県", "岡山県", "広島県", "山口県"], 四国: ["徳島県", "香川県", "愛媛県", "高知県"],
+  九州: ["福岡県", "佐賀県", "長崎県", "熊本県", "大分県", "宮崎県", "鹿児島県"], 沖縄: ["沖縄県"],
+};
+// 選んだ県の地方（名前の並び）。地方の点 ＝ その地方のどれかの県での段の高い方
+const chihouOf = () => [...new Set(S.ken.map((k) => Object.keys(CHIHOU).find((c) => CHIHOU[c].includes(k))).filter(Boolean))];
+function chihouTen(w) {
+  const v = ((S.bundle && S.bundle.kenDan) || {}).dan?.[w];
+  if (!v || !S.ken.length) return 0;
+  let m = 0;
+  for (const c of chihouOf()) for (const k of CHIHOU[c]) { const d = +v[S.kenIdx.get(k)] || 0; if (d > m) m = d; }
+  return m;
+}
 function search() {
   const raw = $("#q").value.trim();
   const hits = $("#hits");
@@ -267,7 +286,7 @@ function search() {
     else if (sci.length < 30 && ql.length >= 3 && sp[1] && sp[1].toLowerCase().startsWith(ql)) sci.push(sp);
   }
   const used = (sp) => S.usage[sp[0]] || 0;
-  const ten = (sp) => kenTen(sp[0]) + Math.min(used(sp), 20) * 0.5;
+  const ten = (sp) => kenTen(sp[0]) + chihouTen(sp[0]) * 0.3 + Math.min(used(sp), 20) * 0.5;   // 県に無くても 地方にあれば少し上
   const rank = (arr) => arr.map((sp, i) => [sp, i, ten(sp), sp[5] === q]).sort((a, b) => (b[3] - a[3]) || (b[2] - a[2]) || (a[1] - b[1])).map((x) => x[0]);
   const list = rank(pre).slice(0, 40);
   if (list.length < 40) list.push(...rank(mid).slice(0, 40 - list.length));
@@ -300,6 +319,12 @@ function search() {
     if (n) ja.append(el("span", { class: "pill", title: "これまでの採用回数" }, `×${n}`));
     const kt = kenTen(sp[0]);
     if (kt) ja.append(el("span", { class: "pill ken", title: `${S.ken.join("・")}で 水国の調査（平成28年度から）で確認（●が多いほど よく確認される）` }, "県" + "●".repeat(kt)));
+    // 地方の記録（県で記録が無くても 地方にあるか・無いか が分かるように）
+    if (S.ken.length && S.bundle.kenDan) {
+      const ct = chihouTen(sp[0]), cn = chihouOf().join("・");
+      ja.append(ct ? el("span", { class: "pill chihou", title: `${cn}地方のどこかの県で 水国の調査（平成28年度から）で確認（●は その地方でいちばん多い県の段）` }, cn + "●".repeat(ct))
+        : el("span", { class: "pill nashi", title: `${cn}地方では 水国の調査（平成28年度から）に記録なし` }, cn + " 記録なし"));
+    }
     const sub = el("span", { class: "sub" }, `${sp[2] || ""}　${sp[1] || ""}`);
     // 亜種が 2 つ以上ある種は分布も出す（どの亜種か選ぶ手がかり。2026-09-27）
     if (dist[sp[0]]) sub.append(el("span", { class: "dist" }, `分布: ${dist[sp[0]]}`));
@@ -367,10 +392,10 @@ function openPick(sp) {
   document.body.append(d);
   d.showModal();
 }
-async function addSpecies(sp) {
-  if (!axesReady()) { toast("先に 季節・採集方法・地点 を選んでください"); return; }
+async function addSpecies(sp, n = 1) {         // n: 地図の記録から数えるときの個体数（ふだんは 1）
+  if (!axesReady()) { toast("先に 季節・採集方法・地点 を選んでください"); return false; }
   if (!$("#ax-その他").disabled && [...$("#ax-その他").options].length > 1 && !S.axes["その他"]) {
-    toast("この手法は「その他」を選んでください"); return;
+    toast("この手法は「その他」を選んでください"); return false;
   }
   S.usage[sp[0]] = (S.usage[sp[0]] || 0) + 1;      // 採用回数（候補の並びに使う）
   kvSet("usage", S.usage);
@@ -378,13 +403,13 @@ async function addSpecies(sp) {
   // 同じ組み合わせに同じ種があれば、書き出し済みでもその記録に +1（変更したので未書き出しに戻る）
   const same = mine().find((r) => r.和名 === sp[0] && comboKey(r) === key);
   if (same) {
-    same.個体数 = (parseInt(same.個体数, 10) || 0) + 1;
+    same.個体数 = (parseInt(same.個体数, 10) || 0) + n;
     same.updated = Date.now();
     same.exported = 0;
     await putRecord(same);
-    toast(`${sp[0]} を +1（${same.個体数}）`);
+    toast(`${sp[0]} を +${n}（${same.個体数}）`);
   } else {
-    const rec = { 業務: S.bundle.case, 和名: sp[0], 個体数: 1, 採集方法: S.axes["採集方法"], 地点: S.axes["地点"],
+    const rec = { 業務: S.bundle.case, 和名: sp[0], 個体数: n, 採集方法: S.axes["採集方法"], 地点: S.axes["地点"],
       その他: S.axes["その他"] || "", 季節: S.axes["季節"], 備考: "", 採集日: today(),
       created: Date.now(), updated: Date.now(), exported: 0 };
     rec.id = await putRecord(rec);
@@ -395,6 +420,64 @@ async function addSpecies(sp) {
   $("#hits").hidden = true;
   renderList();
   $("#q").focus();
+  return true;
+}
+
+// ---------------------------------------------------------------- 地図（現地記録）とのつながり（祝 2026-10-07）
+// 同定保留（地図で「同定保留」にした記録）の名前の印。数えるときも この名前で入る（シノニム処理で未解決として必ず引っかかる。祝 2026-10-07）
+const HORYU = "【同定保留】";
+// 現地記録の地点（genchi-record）を読むだけ。まだ地図を使っていない端末では DB を作らない（作ると現地記録の頁の初めの準備が飛ぶ）
+function genchiDB() {
+  return new Promise((ok) => {
+    let made = false;
+    const r = indexedDB.open("genchi-record");
+    r.onupgradeneeded = () => { made = true; r.transaction.abort(); };
+    r.onsuccess = () => ok(made ? null : r.result);
+    r.onerror = () => ok(null);
+  });
+}
+// 和名 → この業務の地図の地点の番号（新しい順）。一覧の 📍 に番号を出し、押すとその地点を開く
+async function loadGenchi() {
+  S.genchiOf = new Map();
+  const db = await genchiDB(); if (!db) return;
+  try {
+    const ps = await new Promise((ok) => { const q = db.transaction("points").objectStore("points").getAll(); q.onsuccess = () => ok(q.result || []); q.onerror = () => ok([]); });
+    for (const p of ps.filter((p) => p.業務 === (S.bundle && S.bundle.case)).sort((a, b) => b.time - a.time)) {
+      for (const w of new Set((p.recs || []).map((r) => (r.和名 ? r.和名 + (r.保留 ? HORYU : "") : "")).filter(Boolean))) {
+        if (!S.genchiOf.has(w)) S.genchiOf.set(w, []);
+        S.genchiOf.get(w).push(p.no);
+      }
+    }
+  } catch (e) { /* 地図の DB の形が違う（古い）ときは つながりを出さないだけ */ } finally { db.close(); }
+}
+// 地図の記録の「入力画面でも数える」から来て数えられたら、地図の記録に「入力画面で数えた」の印を付ける（二重に数えない）
+async function markGenchiCounted(pid, ri) {
+  const db = await genchiDB(); if (!db) return;
+  await new Promise((ok) => {
+    const t = db.transaction("points", "readwrite"), st = t.objectStore("points"), g = st.get(pid);
+    g.onsuccess = () => { const p = g.result; if (p && p.recs && p.recs[ri]) { p.recs[ri].数え済み = true; st.put(p); } };
+    t.oncomplete = ok; t.onerror = ok; t.onabort = ok;
+  });
+  db.close();
+}
+async function fromGenchi() {
+  const qs = new URL(location.href).searchParams, find = qs.get("find"), count = qs.get("count");
+  if (!find && !count) return;
+  history.replaceState(null, "", location.pathname);        // 読み直しで二度数えない
+  const w = find || count;
+  if (count) {
+    const horyu = w.endsWith(HORYU), sp0 = S.byName && S.byName.get(horyu ? w.slice(0, -HORYU.length) : w);
+    if (!sp0) { toast(`「${w}」は 業務ファイルの和名にありません（地図の記録のまま）`); return; }
+    const sp = horyu ? [w, sp0[1], sp0[2], sp0[3], sp0[4], skey(w)] : sp0;   // 保留は 印を付けない（確定前）
+    const n = Math.max(1, parseInt(qs.get("n"), 10) || 1);
+    if (!(await addSpecies(sp, n))) { toast("先に 季節・採集方法・地点 を選んでから、地図の記録の「入力画面でも数える」をもう一度押してください"); return; }
+    await markGenchiCounted(parseInt(qs.get("pt"), 10), parseInt(qs.get("ri"), 10));
+    await loadGenchi(); renderList();
+  }
+  // その種の行を光らせる（今の地点の一覧に無ければ知らせる）
+  const tr = [...document.querySelectorAll("#tbl tbody tr")].find((t) => t.dataset.wa === w);
+  if (tr) { tr.classList.add("flash"); tr.scrollIntoView({ block: "center" }); setTimeout(() => tr.classList.remove("flash"), 2500); }
+  else if (find) toast(`「${w}」は 今の季節・方法・地点の一覧にありません（右上の「未書き出し」で全部を見られます）`);
 }
 
 // ---------------------------------------------------------------- 一覧
@@ -423,18 +506,41 @@ function renderList() {
     // PC の広い画面だけに出るメモの欄（狭い画面では CSS で隠れる。スマホは和名を押して開く欄で書く）
     const memo = el("td", { class: "memo" }, el("input", { type: "text", value: r.備考 || "", placeholder: "メモ",
       onchange: (e) => setNote(r, e.target.value), onkeydown: (e) => { if (e.key === "Enter") e.target.blur(); } }));
-    const ms = shortMarks(S.byName && S.byName.get(r.和名));
+    // 2 行目は いつも出す（印の無い種も「印なし」。行の高さをそろえて＋−を押しやすく、印が無いことも分かるように。祝 2026-10-07）
+    const marks = shortMarks(S.byName && S.byName.get(r.和名));
+    const ms = marks || (r.和名.endsWith(HORYU)
+      ? el("span", { class: "marks horyu", title: "地図で同定保留にした記録。同定したら 正しい和名で入れ直して この行を 0 に" }, "同定保留")
+      : el("span", { class: "marks none", title: "重要種・外来種の印は ありません" }, "印なし"));
     // 📍 で現地記録へ（地点を測って詳しく。入力画面で数えた印を付けて二重に数えない。祝 2026-10-04）
     // 重要種・外来種は「📍地図に記録」、ほかの種も 📍 だけ出す（重要種かもしれない・持ち帰って調べる種も地図に残せるように）
-    const pin = el("a", { class: "pin", href: `./genchi.html?add=${encodeURIComponent(r.和名)}&from=input`, title: "現地記録で地点・写真・環境を記録する",
-      onclick: (e) => e.stopPropagation() }, ms ? "📍地図に記録" : "📍");
-    if (ms) { name.insertBefore(ms, name.lastChild); ms.append(pin); }
-    else name.insertBefore(pin, name.lastChild);          // 印の無い種は名前のすぐ右に（行を高くしない）
+    // 地図にこの種の地点があれば その地点を開く（📍地点 3）。無ければ 地点を作る（📍＋。祝 2026-10-07）
+    const nos = (S.genchiOf && S.genchiOf.get(r.和名)) || [];
+    const pin = nos.length
+      ? el("a", { class: "pin on", href: `./genchi.html?show=${encodeURIComponent(r.和名)}`, title: "地図でこの種の地点を開く", onclick: (e) => e.stopPropagation() },
+        "📍地点 " + nos.slice(0, 2).join("・") + (nos.length > 2 ? " ほか" : ""))
+      : el("a", { class: "pin", href: `./genchi.html?add=${encodeURIComponent(r.和名)}&from=input`, title: "現地記録で地点・写真・環境を記録する（今いる所に地点を作る）",
+        onclick: (e) => e.stopPropagation() }, marks ? "📍＋地図に記録" : "📍＋");
+    // 備: その行のすぐ下で備考を書く（小窓を開かない。workbench の入力アプリと同じ。祝 2026-10-07）。PC の広い画面は備考の列があるので出さない
+    const bi = el("button", { type: "button", class: "bi" + (r.備考 ? " on" : ""), title: r.備考 ? "備考: " + r.備考 : "備考を書く",
+      onclick: (e) => { e.stopPropagation(); bikouEdit(e.target.closest("tr"), r); } }, "備");
+    name.insertBefore(ms, name.lastChild); ms.append(pin, bi);
     if (r.exported) name.insertBefore(el("span", { class: "pill", title: "書き出し済み。変えると未書き出しに戻ります" }, "済"), name.lastChild);
     // ゴミ箱は置かない（誤タップで消えるのを避ける）。消したいときは − で 0 にする。0 の記録は Excel に出ない
-    tb.append(el("tr", { class: (parseInt(r.個体数, 10) || 0) > 0 ? "" : "zero" }, name, memo, el("td", { class: "num" }, ctr)));
+    tb.append(el("tr", { class: (parseInt(r.個体数, 10) || 0) > 0 ? "" : "zero", "data-wa": r.和名 }, name, memo, el("td", { class: "num" }, ctr)));
   }
   updateCounts();
+}
+// 備考を その行の下で直す。Enter か「残す」で保存、もう一度「備」で閉じる
+function bikouEdit(tr, r) {
+  const nx = tr.nextElementSibling;
+  if (nx && nx.classList.contains("bikou-edit")) { nx.remove(); return; }
+  for (const o of document.querySelectorAll("#tbl tr.bikou-edit")) o.remove();
+  const inp = el("input", { type: "text", value: r.備考 || "", placeholder: "備考（例 灯火に飛来・死体・幼虫）", enterkeyhint: "done" });
+  const save = async () => { await setNote(r, inp.value); renderList(); toast(r.備考 ? `${r.和名} の備考を残しました` : `${r.和名} の備考を消しました`); };
+  inp.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); save(); } });
+  tr.after(el("tr", { class: "bikou-edit" }, el("td", { colspan: 3 },
+    el("div", { class: "bk" }, inp, el("button", { type: "button", class: "btn", onclick: save }, "残す")))));
+  inp.focus();
 }
 function updateCounts() {
   const all = mine();
@@ -768,7 +874,9 @@ async function boot() {
   if (url) {
     try { b = await (await fetch(url)).json(); await kvSet("bundle", b); } catch (e) { toast("業務ファイルを取れませんでした: " + url); }
   }
-  if (b) await applyBundle(b); else { $("#setup").hidden = false; showMain(false); $("#setup").hidden = false; }
+  if (b) { await applyBundle(b); await fromGenchi(); } else { $("#setup").hidden = false; showMain(false); $("#setup").hidden = false; }
+  // 地図から端末の「戻る」で戻ったときも 📍 の地点の番号を新しくする
+  window.addEventListener("pageshow", async (e) => { if (e.persisted && S.bundle) { await loadGenchi(); renderList(); } });
 
   if (!("indexedDB" in window)) $("#banner").hidden = false, $("#banner").textContent = "このブラウザでは記録を保存できません。";
   if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost" || location.hostname === "127.0.0.1")) {
