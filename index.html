@@ -74,6 +74,10 @@ td .note{width:100%;border:0;border-bottom:1px dashed var(--line);padding:4px 0;
 .setup{display:flex;flex-direction:column;gap:10px}
 .setup input[type=file]{font-size:14px}
 .pill{display:inline-block;font-size:11px;background:var(--soft);color:var(--accent);border-radius:999px;padding:0 6px;margin-left:6px}
+.pill.ken{background:#e6f4ea;color:#1e6b34}
+#ken-chips{display:flex;flex-wrap:wrap;gap:4px}
+#ken-chips .chip{font-size:13px;padding:2px 7px;border:1px solid #c8c8c8;border-radius:999px;background:#fff;color:#444}
+#ken-chips .chip.on{background:#1e6b34;border-color:#1e6b34;color:#fff}
 .tag{display:inline-block;font-size:11px;line-height:1.15;border-radius:4px;padding:0 4px;margin-left:5px;font-weight:600;vertical-align:middle;white-space:nowrap}
 .tag.rdb{background:#fde8e8;color:#b3261e;border:1px solid #f2b8b5}
 .tag.alien{background:#fff4c2;color:#7a5a00;border:1px solid #e8d27a}
@@ -233,6 +237,11 @@ th.memo,td.memo{display:none}
   <div class="row">
     <div id="usage-info" style="font-size:14px"></div>
     <button class="btn warn" id="btn-clear-usage">採用回数を消す（五十音順に戻す）</button>
+  </div>
+  <div class="row" id="ken-row">
+    <label>候補の並びに使う県（押して選ぶ・外す。2 つ以上も可）</label>
+    <div id="ken-chips"></div>
+    <small class="hint">選んだ県で 水国の調査（平成28年度から）でよく確認された種ほど 候補の上に出ます（県●〜●●●）。<span id="ken-hint"></span></small>
   </div>
   <h4>記録</h4>
   <div class="row">

@@ -7,7 +7,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "v49";   // 画面の版（sw.js の VERSION と合わせる。☰ に出す）
+const APP_VERSION = "v50";   // 画面の版（sw.js の VERSION と合わせる。☰ に出す）
 const AXES = ["季節", "採集方法", "地点", "その他"];
 const COLS = ["和名", "個体数", "採集方法", "地点", "その他", "季節", "備考", "採集日"];
 const $ = (s) => document.querySelector(s);
@@ -70,6 +70,7 @@ const S = {
   axes: {},            // 選択中の調査設定の値
   records: [],         // 端末内の全記録
   usage: {},           // 和名 → 採用回数（候補の並びに使う。端末内に保存）
+  ken: [],             // 候補の並びに使う県（☰ で選ぶ。業務ごとに端末に保存。既定は業務ファイルの kenDefault）
   showAll: false,
   recentTop: false,   // true: 入れた・変えた種を一覧の上に出す（☰ の設定。既定は入れた順で動かさない）
   editing: null,
@@ -129,6 +130,11 @@ async function applyBundle(b) {
   const def = (b.masters || []).find((m) => m[0] === (b.masterDefault || "統合"));
   const saved = await kvGet("masterBit");
   S.masterBit = saved || (def ? def[1] : 1);
+  // 候補の並びに使う県（水国の調査で 県ごとに確認された多さ。insectdata の公開の入力アプリと同じ考え。2026-10-07）
+  const kd = b.kenDan || {};
+  S.kenIdx = new Map((kd.ken || []).map((k, i) => [k, i]));
+  const ks = await kvGet("ken:" + (b.case || ""));
+  S.ken = (Array.isArray(ks) ? ks : (b.kenDefault || [])).filter((k) => S.kenIdx.has(k));
   $("#title").textContent = b.case || "昆虫調査 入力";
   // 前回の調査設定の選択を復元
   S.axes = (await kvGet("axes")) || {};
@@ -235,6 +241,14 @@ function onQuery() {
   clearTimeout(qTimer);
   qTimer = setTimeout(search, 80);
 }
+// 県の点（選んだ県で 水国の調査（平成28年度から）で確認された多さ 0〜3。2 つ以上選んだら高い方。選んでいなければ 0）
+function kenTen(w) {
+  const v = ((S.bundle && S.bundle.kenDan) || {}).dan?.[w];
+  if (!v || !S.ken.length) return 0;
+  let m = 0;
+  for (const k of S.ken) { const d = +v[S.kenIdx.get(k)] || 0; if (d > m) m = d; }
+  return m;
+}
 function search() {
   const raw = $("#q").value.trim();
   const hits = $("#hits");
@@ -242,7 +256,8 @@ function search() {
   if (!raw || !S.bundle) { hits.hidden = true; return; }
   buildOlds();                                     // 裏で作り終わる前に打ったときだけ ここで作る
   const q = skey(raw), ql = raw.toLowerCase();
-  // 先頭一致 → 部分一致 → 学名の先頭一致 の順。その中では採用回数の多い順、同数なら五十音順
+  // 先頭一致 → 部分一致 → 学名の先頭一致 の順。その中では 点数（県の点 ＋ 採用回数の点）の高い順、同点なら五十音順。
+  // 打った名前とちょうど同じ和名は いちばん上（2026-10-07）
   const pre = [], mid = [], sci = [];
   for (const sp of S.bundle.species) {
     if (!(sp[4] & S.masterBit)) continue;
@@ -252,7 +267,8 @@ function search() {
     else if (sci.length < 30 && ql.length >= 3 && sp[1] && sp[1].toLowerCase().startsWith(ql)) sci.push(sp);
   }
   const used = (sp) => S.usage[sp[0]] || 0;
-  const rank = (arr) => arr.map((sp, i) => [sp, i]).sort((a, b) => (used(b[0]) - used(a[0])) || (a[1] - b[1])).map((x) => x[0]);
+  const ten = (sp) => kenTen(sp[0]) + Math.min(used(sp), 20) * 0.5;
+  const rank = (arr) => arr.map((sp, i) => [sp, i, ten(sp), sp[5] === q]).sort((a, b) => (b[3] - a[3]) || (b[2] - a[2]) || (a[1] - b[1])).map((x) => x[0]);
   const list = rank(pre).slice(0, 40);
   if (list.length < 40) list.push(...rank(mid).slice(0, 40 - list.length));
   list.push(...rank(sci).slice(0, 10));
@@ -282,6 +298,8 @@ function search() {
     ja.append(...marks(sp));
     if (picks[sp[0]]) ja.append(el("span", { class: "tag pick", title: "誤同定の名など。押すと説明と候補が出ます" }, "要選択"));
     if (n) ja.append(el("span", { class: "pill", title: "これまでの採用回数" }, `×${n}`));
+    const kt = kenTen(sp[0]);
+    if (kt) ja.append(el("span", { class: "pill ken", title: `${S.ken.join("・")}で 水国の調査（平成28年度から）で確認（●が多いほど よく確認される）` }, "県" + "●".repeat(kt)));
     const sub = el("span", { class: "sub" }, `${sp[2] || ""}　${sp[1] || ""}`);
     // 亜種が 2 つ以上ある種は分布も出す（どの亜種か選ぶ手がかり。2026-09-27）
     if (dist[sp[0]]) sub.append(el("span", { class: "dist" }, `分布: ${dist[sp[0]]}`));
@@ -672,7 +690,30 @@ function openMenu() {
   $("#usage-info").textContent = nu ? `${nu} 種の採用回数を覚えています（多い種ほど候補の上に出ます）` : "まだ採用回数の記録はありません";
   $("#btn-clear-usage").disabled = !nu;
   $("#chk-recent-top").checked = S.recentTop;
+  renderKen();
   $("#dlg-menu").showModal();
+}
+
+// 候補の並びに使う県を選ぶ（☰）。押すたびに 業務ごとに端末へ保存
+function renderKen() {
+  const box = $("#ken-chips"), kd = (S.bundle && S.bundle.kenDan) || null;
+  box.textContent = "";
+  $("#ken-row").hidden = !kd;
+  if (!kd) return;
+  for (const k of kd.ken || []) {
+    box.append(el("button", { type: "button", class: "chip" + (S.ken.includes(k) ? " on" : ""), onclick: async (e) => {
+      S.ken = S.ken.includes(k) ? S.ken.filter((x) => x !== k) : [...S.ken, k];
+      e.target.classList.toggle("on", S.ken.includes(k));
+      await kvSet("ken:" + S.bundle.case, S.ken);
+      kenHint();
+    } }, k.replace(/[都府県]$/, "")));
+  }
+  kenHint();
+}
+function kenHint() {
+  const b = S.bundle || {};
+  $("#ken-hint").textContent = (S.ken.length ? `いまは ${S.ken.join("・")}。` : "いまは選んでいません（五十音と採用回数で並びます）。")
+    + `業務の既定は ${(b.kenDefault || []).join("・") || "なし"}（調査設定「重要種」の県のレッドリストから）。水国の調査結果 ${(b.kenDan || {}).src || ""} 時点。`;
 }
 
 // ---------------------------------------------------------------- 起動
