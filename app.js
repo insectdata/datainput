@@ -7,7 +7,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "v57";   // 画面の版（sw.js の VERSION と合わせる。☰ に出す）
+const APP_VERSION = "v58";   // 画面の版（sw.js の VERSION と合わせる。☰ に出す）
 const AXES = ["季節", "採集方法", "地点", "その他"];
 const COLS = ["和名", "個体数", "採集方法", "地点", "その他", "季節", "備考", "採集日"];
 const $ = (s) => document.querySelector(s);
@@ -314,6 +314,8 @@ function search() {
   for (const sp of [...list, ...extra]) {
     const exact = sp[5] === q, n = used(sp);
     const ja = el("span", { class: "ja" + (exact ? " exact" : "") }, sp[0]);
+    const ks = kisetsuEl(sp[0]);
+    if (ks) ja.append(ks);
     ja.append(...marks(sp));
     if (picks[sp[0]]) ja.append(el("span", { class: "tag pick", title: "誤同定の名など。押すと説明と候補が出ます" }, "要選択"));
     if (n) ja.append(el("span", { class: "pill", title: "これまでの採用回数" }, `×${n}`));
@@ -341,6 +343,16 @@ function search() {
     hits.append(el("li", { onclick: () => (picks[sp[0]] ? openPick(sp) : addSpecies(sp)) }, ja, sub));
   }
   hits.hidden = false;
+}
+// 季節の割合（水国の調査で 春 3〜5・夏 6〜8・秋 9〜11・冬 12〜2 月の記録の割合 %。業務ファイルの kisetsu）。
+// 「春26夏63秋11冬0」の形。いちばん多い季節（同じなら全部）だけ 季節の色で塗り、ほかは灰色
+function kisetsuEl(w) {
+  const k = S.bundle && S.bundle.kisetsu, v = k && k.pct && k.pct[w];
+  if (!v) return null;
+  const mx = Math.max(...v), n = (k.n || {})[w] || 0;
+  const box = el("span", { class: "kis", title: `水国の調査（${k.nendo || ""}年度・全国）の記録 ${n} 件の 季節の割合（春 3〜5月・夏 6〜8月・秋 9〜11月・冬 12〜2月）` });
+  ["春", "夏", "秋", "冬"].forEach((s, i) => box.append(el("span", { class: "k" + i + (v[i] === mx && mx > 0 ? " top" : "") }, s + v[i])));
+  return box;
 }
 // 重要種・外来種の印。業務ファイルの rdbCols（調査設定「重要種」シートの ○）と species の 7 番目から
 function marks(sp) {
