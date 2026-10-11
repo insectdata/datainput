@@ -1,13 +1,13 @@
 /* 昆虫調査 入力アプリ
  * 外部ライブラリなし。データは端末の IndexedDB に置く。
- *   bundle  … PCで作った スマホ用.json（業務の調査設定、和名の索引）
+ *   bundle  … PCで作った スマホ用ファイル（<業務名>スマホ用.json.gz か .json。業務の調査設定、和名の索引）
  *   records … 入力した記録（7列＋採集日、書き出し済みフラグ）
  * 書き出しは xlsx（zip を自前で組む。圧縮なし）。
  */
 (() => {
 "use strict";
 
-const APP_VERSION = "v58";   // 画面の版（sw.js の VERSION と合わせる。☰ に出す）
+const APP_VERSION = "v59";   // 画面の版（sw.js の VERSION と合わせる。☰ に出す）
 const AXES = ["季節", "採集方法", "地点", "その他"];
 const COLS = ["和名", "個体数", "採集方法", "地点", "その他", "季節", "備考", "採集日"];
 const $ = (s) => document.querySelector(s);
@@ -89,10 +89,19 @@ function skey(s) {
 }
 
 // ---------------------------------------------------------------- 業務ファイル
+// 業務ファイルを読む。頭の 2 バイトが 1f 8b なら gzip（.json.gz）なので ほどいてから JSON に。そうでなければ そのまま JSON
+async function bundleFromBlob(blob) {
+  const head = new Uint8Array(await new Response(blob.slice(0, 2)).arrayBuffer());
+  if (head[0] === 0x1f && head[1] === 0x8b) {
+    if (typeof DecompressionStream === "undefined" || !blob.stream)
+      throw new Error("この端末では .gz のファイルを読めません。同じ名前の .json の方を選んでください");
+    return JSON.parse(await new Response(blob.stream().pipeThrough(new DecompressionStream("gzip"))).text());
+  }
+  return JSON.parse(await new Response(blob).text());
+}
 async function loadBundleFile(file) {
   try {
-    const text = await file.text();
-    const b = JSON.parse(text);
+    const b = await bundleFromBlob(file);
     if (!b || !Array.isArray(b.species) || !b.axes) throw new Error("形式が違います");
     await kvSet("bundle", b);
     await applyBundle(b);
@@ -884,7 +893,7 @@ async function boot() {
   const url = new URL(location.href).searchParams.get("bundle");
   let b = await kvGet("bundle");
   if (url) {
-    try { b = await (await fetch(url)).json(); await kvSet("bundle", b); } catch (e) { toast("業務ファイルを取れませんでした: " + url); }
+    try { b = await bundleFromBlob(await (await fetch(url)).blob()); await kvSet("bundle", b); } catch (e) { toast("業務ファイルを取れませんでした: " + url); }
   }
   if (b) { await applyBundle(b); await fromGenchi(); } else { $("#setup").hidden = false; showMain(false); $("#setup").hidden = false; }
   // 地図から端末の「戻る」で戻ったときも 📍 の地点の番号を新しくする

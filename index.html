@@ -188,8 +188,8 @@ th.memo,td.memo{display:none}
   <section id="setup" hidden>
     <h2>業務ファイルを読み込む</h2>
     <div class="setup">
-      <p style="margin:0;font-size:14px">PCで作った <b>スマホ用.json</b>（業務の軸と和名の索引）を選んでください。一度読み込めば端末に保存され、圏外でも使えます。</p>
-      <input type="file" id="file-bundle" accept=".json,application/json">
+      <p style="margin:0;font-size:14px">PCで作った <b>スマホ用ファイル</b>（業務の軸と和名の索引）を選んでください。<b>○○スマホ用.json.gz</b>（小さい）を選び、読めないと出たら <b>○○スマホ用.json</b> を選びます。一度読み込めば端末に保存され、圏外でも使えます。</p>
+      <input type="file" id="file-bundle">
       <small class="hint">作り方：PCの業務フォルダで <code>スマホ用ファイル</code> を作る（はじめにお読みください.txt 参照）</small>
     </div>
   </section>
@@ -247,7 +247,7 @@ th.memo,td.memo{display:none}
   <div class="row">
     <label>業務ファイル（別の業務に切り替えるにはここで読み直す）</label>
     <div id="bundle-info" style="font-size:14px"></div>
-    <input type="file" id="file-bundle2" accept=".json,application/json">
+    <input type="file" id="file-bundle2">
   </div>
   <h4>候補</h4>
   <div class="row">

@@ -3,7 +3,7 @@
  *   地点 … 位置は地点ごとに 1 度だけ測る（測り直す・位置を動かす・消す）。1 地点に記録と写真をいくつでも
  *   記録 … 区分（重要種・確認種・環境）・和名・個体数・方法・環境・確認された植物・メモ・写真
  *   地図 … 地理院（標準・航空写真）＋ 植生図 ＋ 地質図（産総研。g19）＋ 業務の地図 ＋ 地点 ＋ 現在地。トラックは扱わない（ガーミンで取る）
- *          業務の地図は 業務ファイル（スマホ用.json）の genchiMap（業務フォルダの「地図」フォルダから作る）か、
+ *          業務の地図は 業務ファイル（スマホ用ファイル）の genchiMap（業務フォルダの「地図」フォルダから作る）か、
  *          ☰ で読み込む ○○_現地記録用の地図.json（新しい方を使う）
  *   和名の索引は 種名の入力画面で読み込んだ業務ファイル（端末の konchu-input に入っている）を読むだけ
  * データは端末の IndexedDB（genchi-record）。書き出しは zip（地点の一覧.xlsx・入力データ.xlsx・シェープファイル・GPX・GeoJSON・
@@ -11,7 +11,7 @@
  */
 (() => {
 "use strict";
-const GENCHI_VERSION = "g25";
+const GENCHI_VERSION = "g26";
 const $ = (s) => document.querySelector(s);
 const el = (t, attrs = {}, ...kids) => {
   const e = document.createElement(t);
