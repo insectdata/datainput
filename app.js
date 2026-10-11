@@ -7,7 +7,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "v59";   // 画面の版（sw.js の VERSION と合わせる。☰ に出す）
+const APP_VERSION = "v60";   // 画面の版（sw.js の VERSION と合わせる。☰ に出す）
 const AXES = ["季節", "採集方法", "地点", "その他"];
 const COLS = ["和名", "個体数", "採集方法", "地点", "その他", "季節", "備考", "採集日"];
 const $ = (s) => document.querySelector(s);
@@ -74,11 +74,12 @@ const S = {
   showAll: false,
   recentTop: false,   // true: 入れた・変えた種を一覧の上に出す（☰ の設定。既定は入れた順で動かさない）
   editing: null,
+  ima: null, chika: new Map(),   // 📍近く: 今いる所・和名 → [きょり km, 地区名]
 };
 const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
 const stamp = () => { const d = new Date(); const p = (n) => String(n).padStart(2, "0"); return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}`; };
 let toastTimer = null;
-function toast(msg) { const t = $("#toast"); t.textContent = msg; t.classList.add("on"); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove("on"), 2200); }
+function toast(msg, ms = 2200) { const t = $("#toast"); t.textContent = msg; t.classList.add("on"); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove("on"), ms); }
 
 // 検索キー（PC側 make_mobile_bundle.search_key と同じ規則）
 function skey(s) {
@@ -135,6 +136,7 @@ async function applyBundle(b) {
   // 旧名（シノニム名。名前引き台帳の 名前の変遷 から。2026-09-29）: [旧名, [species の行の番号…], 印（1＝ほかの種にも使われた名前）]
   // 旧名の検索キーは 画面が出てから裏で作る（画面の切り替えを待たせない。打つ前に作り終わるので打つときも重くならない。祝 2026-10-04）
   S.olds = null; S.oldNames = null;
+  S.ima = null; S.chika = new Map();               // 📍近く は業務を読み込み直したら取り直す
   setTimeout(buildOlds, 400);
   const def = (b.masters || []).find((m) => m[0] === (b.masterDefault || "統合"));
   const saved = await kvGet("masterBit");
@@ -277,6 +279,51 @@ function chihouTen(w) {
   for (const c of chihouOf()) for (const k of CHIHOU[c]) { const d = +v[S.kenIdx.get(k)] || 0; if (d > m) m = d; }
   return m;
 }
+// 📍近く: 今いる所から HANKEI_KM 内の水国の調査地区で確認された種を 候補の上に出す（業務ファイルの chikaku。insectdata の公開の入力アプリと同じ考え）
+const HANKEI_KM = 3;
+const kyori = (la1, lo1, la2, lo2) => {          // 2 点のきょり（km）
+  const r = Math.PI / 180, a = Math.sin((la2 - la1) * r / 2) ** 2 + Math.cos(la1 * r) * Math.cos(la2 * r) * Math.sin((lo2 - lo1) * r / 2) ** 2;
+  return 12742 * Math.asin(Math.sqrt(a));
+};
+function calcChika() {
+  S.chika = new Map();
+  const ck = S.bundle && S.bundle.chikaku;
+  if (!S.ima || !ck) return;
+  for (const [ken, j] of Object.entries(ck.ken || {})) {
+    j.c.forEach(([lon, lat, na], i) => {
+      const d = kyori(S.ima.lat, S.ima.lon, lat, lon);
+      if (d > HANKEI_KM) return;
+      for (const r of j.s[i]) {
+        const sp = S.bundle.species[r];
+        if (!sp) continue;
+        const m = S.chika.get(sp[0]);
+        if (!m || d < m[0]) S.chika.set(sp[0], [d, na]);
+      }
+    });
+  }
+}
+function getPos() {
+  return new Promise((ok, ng) => {
+    if (!navigator.geolocation) return ng(new Error("この端末では位置を取れません"));
+    navigator.geolocation.getCurrentPosition((p) => ok(p.coords), (e) => ng(new Error(e.code === 1 ? "位置の利用が許可されていません（ブラウザの設定で許可してください）" : e.code === 3 ? "位置の取得に時間がかかりすぎました" : "位置を取れませんでした")),
+      { enableHighAccuracy: true, maximumAge: 10000, timeout: 20000 });
+  });
+}
+async function chikaku() {
+  if (!S.bundle) return;
+  if (!S.bundle.chikaku) return toast("この業務ファイルには 近くの調査地区の表がありません（簡易版で スマホ用ファイルを作り直すと入ります）", 4500);
+  const btn = $("#chikaku");
+  btn.disabled = true;
+  try {
+    const c = await getPos();
+    S.ima = { lat: c.latitude, lon: c.longitude };
+    calcChika();
+    const n = S.chika.size;
+    toast(n ? `${HANKEI_KM}km 内の水国の調査地区で確認された種 ${n} 種を 候補の上に出します（位置の誤差 ${Math.round(c.accuracy || 0)}m）` : `${HANKEI_KM}km 内に 水国の調査地区が見つかりません（位置の誤差 ${Math.round(c.accuracy || 0)}m）`, 4500);
+    search();
+  } catch (e) { toast(e.message || "位置を取れませんでした", 4500); }
+  btn.disabled = false;
+}
 function search() {
   const raw = $("#q").value.trim();
   const hits = $("#hits");
@@ -295,7 +342,7 @@ function search() {
     else if (sci.length < 30 && ql.length >= 3 && sp[1] && sp[1].toLowerCase().startsWith(ql)) sci.push(sp);
   }
   const used = (sp) => S.usage[sp[0]] || 0;
-  const ten = (sp) => kenTen(sp[0]) + chihouTen(sp[0]) * 0.3 + Math.min(used(sp), 20) * 0.5;   // 県に無くても 地方にあれば少し上
+  const ten = (sp) => kenTen(sp[0]) + chihouTen(sp[0]) * 0.3 + (S.chika.has(sp[0]) ? 4 : 0) + Math.min(used(sp), 20) * 0.5;   // 県に無くても 地方にあれば少し上
   const rank = (arr) => arr.map((sp, i) => [sp, i, ten(sp), sp[5] === q]).sort((a, b) => (b[3] - a[3]) || (b[2] - a[2]) || (a[1] - b[1])).map((x) => x[0]);
   const list = rank(pre).slice(0, 40);
   if (list.length < 40) list.push(...rank(mid).slice(0, 40 - list.length));
@@ -328,6 +375,8 @@ function search() {
     ja.append(...marks(sp));
     if (picks[sp[0]]) ja.append(el("span", { class: "tag pick", title: "誤同定の名など。押すと説明と候補が出ます" }, "要選択"));
     if (n) ja.append(el("span", { class: "pill", title: "これまでの採用回数" }, `×${n}`));
+    const ch = S.chika.get(sp[0]);                 // 📍近く: 今いる所の近くの調査地区で確認
+    if (ch) ja.append(el("span", { class: "pill chika", title: `水国の調査地区（${ch[1]}）で確認（平成28年度から）` }, `近くで確認 ${ch[0] < 1 ? "1km内" : ch[0].toFixed(1) + "km"}`));
     const kt = kenTen(sp[0]);
     if (kt) ja.append(el("span", { class: "pill ken", title: `${S.ken.join("・")}で 水国の調査（平成28年度から）で確認（●が多いほど よく確認される）` }, "県" + "●".repeat(kt)));
     // 地方の記録（県で記録が無くても 地方にあるか・無いか が分かるように）
@@ -859,6 +908,7 @@ async function boot() {
   $("#file-bundle2").onchange = (e) => { if (e.target.files[0]) { loadBundleFile(e.target.files[0]); $("#dlg-menu").close(); } };
   $("#file-import").onchange = async (e) => { if (e.target.files[0]) { await importFile(e.target.files[0]); e.target.value = ""; $("#dlg-menu").close(); } };
   $("#q").oninput = onQuery;
+  $("#chikaku").onclick = chikaku;
   $("#q-clear").onclick = () => { $("#q").value = ""; $("#hits").hidden = true; $("#q").focus(); };
   $("#tog-all").onclick = () => { S.showAll = !S.showAll; renderList(); };
   $("#btn-export").onclick = () => exportRecords(false);

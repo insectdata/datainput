@@ -34,6 +34,10 @@ section{background:var(--paper);border:1px solid var(--line);border-radius:var(-
 .axes label{display:flex;flex-direction:column;gap:0;font-size:11px;color:var(--muted)}
 .axes select,.axes input{padding:1px 3px;border:1px solid var(--line);border-radius:6px;background:#fff;font-size:16px;min-height:28px}
 .axes select:disabled{background:var(--soft);color:var(--muted)}
+.searchrow{display:flex;gap:4px;align-items:stretch}
+.searchrow .search{flex:1;min-width:0}
+.near{flex:none;padding:0 8px;border:1px solid var(--accent);background:#fff;color:var(--accent);border-radius:6px;font-weight:600;font-size:14px;white-space:nowrap}
+.near:disabled{opacity:.5}
 .search{position:relative}
 .search input{width:100%;padding:4px 40px 4px 8px;border:1px solid var(--line);border-radius:6px;font-size:19px;font-weight:600;min-height:40px}
 .search .clear{position:absolute;right:2px;top:4px;height:32px;width:34px;border:0;background:transparent;color:var(--muted);font-size:20px}
@@ -86,6 +90,7 @@ td .note{width:100%;border:0;border-bottom:1px dashed var(--line);padding:4px 0;
 .pill{display:inline-block;font-size:11px;background:var(--soft);color:var(--accent);border-radius:999px;padding:0 6px;margin-left:6px}
 .pill.ken{background:#e6f4ea;color:#1e6b34}
 .pill.chihou{background:#eef3fb;color:#1a4d99}
+.pill.chika{background:#fff1dc;color:#9a5300}
 .pill.nashi{background:#f1f1f1;color:#888}
 /* 季節の割合（春26夏63秋11冬0）。いちばん多い季節だけ季節の色、ほかは灰色 */
 .kis{display:inline-block;margin-left:6px;font-size:12px;font-weight:400;color:#9a9a9a;white-space:nowrap;letter-spacing:-.02em}
@@ -204,9 +209,12 @@ th.memo,td.memo{display:none}
   </section>
 
   <section id="search-box" hidden>
-    <div class="search">
-      <input id="q" type="search" placeholder="和名を入力（カタカナ・ひらがな・学名の先頭でも可）" autocomplete="off" autocorrect="off" spellcheck="false" enterkeyhint="search">
-      <button class="clear" id="q-clear" aria-label="消す">×</button>
+    <div class="searchrow">
+      <div class="search">
+        <input id="q" type="search" placeholder="和名を入力（カタカナ・ひらがな・学名の先頭でも可）" autocomplete="off" autocorrect="off" spellcheck="false" enterkeyhint="search">
+        <button class="clear" id="q-clear" aria-label="消す">×</button>
+      </div>
+      <button type="button" id="chikaku" class="near" title="今いる所から 3km 内の 水国の調査地区で確認された種を 候補の上に出す">📍近く</button>
     </div>
     <ul class="hits" id="hits" hidden></ul>
   </section>
