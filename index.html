@@ -252,6 +252,12 @@ th.memo,td.memo{display:none}
 
 <dialog id="dlg-menu">
   <h3>設定</h3>
+  <h4>業務</h4>
+  <div class="row">
+    <label>業務ファイル（別の業務に切り替えるにはここで読み直す）</label>
+    <div id="bundle-info" style="font-size:14px"></div>
+    <input type="file" id="file-bundle2">
+  </div>
   <h4>ファイル</h4>
   <div class="row">
     <button class="btn sec" id="btn-export-all">この業務の記録を全部 Excel に書き出す</button>
@@ -268,11 +274,14 @@ th.memo,td.memo{display:none}
     <small class="hint">試しの版。この画面で読み込んだ業務ファイルの和名を使います</small>
     <a class="btn sec" href="./draw.html" style="text-align:center;text-decoration:none">業務の地図を描く（範囲・トラップ・バッファ。PC 向け）</a>
   </div>
-  <h4>業務</h4>
+  <h4>記録</h4>
   <div class="row">
-    <label>業務ファイル（別の業務に切り替えるにはここで読み直す）</label>
-    <div id="bundle-info" style="font-size:14px"></div>
-    <input type="file" id="file-bundle2">
+    <label class="chk"><input type="checkbox" id="chk-recent-top"> 入れた・個体数を変えた種を一覧の上に出す</label>
+    <small class="hint">切ると入れた順のまま動きません（新しい種は下に足します）</small>
+  </div>
+  <div class="row">
+    <div id="rec-info" style="font-size:14px"></div>
+    <button class="btn warn" id="btn-clear-exported">この業務の書き出し済みの記録を端末から消す</button>
   </div>
   <h4>候補</h4>
   <div class="row">
@@ -288,15 +297,6 @@ th.memo,td.memo{display:none}
     <label>候補の並びに使う県（押して選ぶ・外す。2 つ以上も可）</label>
     <div id="ken-chips"></div>
     <small class="hint">選んだ県で 水国の調査（平成28年度から）でよく確認された種ほど 候補の上に出ます（県●〜●●●）。<span id="ken-hint"></span></small>
-  </div>
-  <h4>記録</h4>
-  <div class="row">
-    <label class="chk"><input type="checkbox" id="chk-recent-top"> 入れた・個体数を変えた種を一覧の上に出す</label>
-    <small class="hint">切ると入れた順のまま動きません（新しい種は下に足します）</small>
-  </div>
-  <div class="row">
-    <div id="rec-info" style="font-size:14px"></div>
-    <button class="btn warn" id="btn-clear-exported">この業務の書き出し済みの記録を端末から消す</button>
   </div>
   <div class="actions">
     <button class="btn sec" id="btn-close-menu">閉じる</button>
