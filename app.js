@@ -7,7 +7,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "v61";   // 画面の版（sw.js の VERSION と合わせる。☰ に出す）
+const APP_VERSION = "v62";   // 画面の版（sw.js の VERSION と合わせる。☰ に出す）
 const AXES = ["季節", "採集方法", "地点", "その他"];
 const COLS = ["和名", "個体数", "採集方法", "地点", "その他", "季節", "備考", "採集日"];
 const $ = (s) => document.querySelector(s);
@@ -1050,7 +1050,6 @@ async function boot() {
   $("#btn-export-all").onclick = () => { $("#dlg-menu").close(); exportRecords(true); };
   $("#btn-menu").onclick = openMenu;
   $("#btn-close-menu").onclick = () => $("#dlg-menu").close();
-  $("#btn-move").onclick = openMove;
   $("#btn-move2").onclick = openMove;
   $("#btn-mv-cancel").onclick = () => $("#dlg-move").close();
   $("#btn-mv-go").onclick = doMove;
