@@ -11,7 +11,7 @@
  */
 (() => {
 "use strict";
-const GENCHI_VERSION = "g26";
+const GENCHI_VERSION = "g27";
 const $ = (s) => document.querySelector(s);
 const el = (t, attrs = {}, ...kids) => {
   const e = document.createElement(t);
@@ -1512,7 +1512,13 @@ async function boot() {
     } catch (err) { toast("読み込めませんでした: " + (err.message || err)); }
     e.target.value = "";
   };
-  if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost" || location.hostname === "127.0.0.1")) {
+  const pcLocal = location.hostname === "localhost" || location.hostname === "127.0.0.1";
+  if (pcLocal && "serviceWorker" in navigator) {
+    // PC（操作画面のデータ入力・試しのサーバ）は 画面の控えを使わない。前に入った控えも外す（地図のタイルの控えは残す）。祝 2026-10-28
+    navigator.serviceWorker.getRegistrations().then((rs) => rs.forEach((r) => r.unregister())).catch(() => {});
+    if (window.caches) caches.keys().then((ks) => ks.filter((k) => k !== "gsi-tiles").forEach((k) => caches.delete(k))).catch(() => {});
+  }
+  if ("serviceWorker" in navigator && location.protocol === "https:") {
     navigator.serviceWorker.register("./sw.js").catch(() => {});
     // 新しい版が裏で入ったら 上に知らせる。押すまで読み直さない（入力の途中で画面を変えない。祝 2026-10-04）
     const hadCtl = !!navigator.serviceWorker.controller;

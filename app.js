@@ -7,7 +7,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "v60";   // 画面の版（sw.js の VERSION と合わせる。☰ に出す）
+const APP_VERSION = "v61";   // 画面の版（sw.js の VERSION と合わせる。☰ に出す）
 const AXES = ["季節", "採集方法", "地点", "その他"];
 const COLS = ["和名", "個体数", "採集方法", "地点", "その他", "季節", "備考", "採集日"];
 const $ = (s) => document.querySelector(s);
@@ -374,18 +374,21 @@ function search() {
     if (ks) ja.append(ks);
     ja.append(...marks(sp));
     if (picks[sp[0]]) ja.append(el("span", { class: "tag pick", title: "誤同定の名など。押すと説明と候補が出ます" }, "要選択"));
-    if (n) ja.append(el("span", { class: "pill", title: "これまでの採用回数" }, `×${n}`));
+    const l2 = el("span", { class: "l2" });      // 2 行目（採用回数・近く・県・地方。どの幅でも。祝 2026-10-28）
+    if (n) l2.append(el("span", { class: "pill", title: "これまでの採用回数" }, `×${n}`));
     const ch = S.chika.get(sp[0]);                 // 📍近く: 今いる所の近くの調査地区で確認
-    if (ch) ja.append(el("span", { class: "pill chika", title: `水国の調査地区（${ch[1]}）で確認（平成28年度から）` }, `近くで確認 ${ch[0] < 1 ? "1km内" : ch[0].toFixed(1) + "km"}`));
+    if (ch) l2.append(el("span", { class: "pill chika", title: `水国の調査地区（${ch[1]}）で確認（平成28年度から）` }, `近くで確認 ${ch[0] < 1 ? "1km内" : ch[0].toFixed(1) + "km"}`));
     const kt = kenTen(sp[0]);
-    if (kt) ja.append(el("span", { class: "pill ken", title: `${S.ken.join("・")}で 水国の調査（平成28年度から）で確認（●が多いほど よく確認される）` }, "県" + "●".repeat(kt)));
+    if (kt) l2.append(el("span", { class: "pill ken", title: `${S.ken.join("・")}で 水国の調査（平成28年度から）で確認（●が多いほど よく確認される）` }, "県" + "●".repeat(kt)));
     // 地方の記録（県で記録が無くても 地方にあるか・無いか が分かるように）
     if (S.ken.length && S.bundle.kenDan) {
       const ct = chihouTen(sp[0]), cn = chihouOf().join("・");
-      ja.append(ct ? el("span", { class: "pill chihou", title: `${cn}地方のどこかの県で 水国の調査（平成28年度から）で確認（●は その地方でいちばん多い県の段）` }, cn + "●".repeat(ct))
+      l2.append(ct ? el("span", { class: "pill chihou", title: `${cn}地方のどこかの県で 水国の調査（平成28年度から）で確認（●は その地方でいちばん多い県の段）` }, cn + "●".repeat(ct))
         : el("span", { class: "pill nashi", title: `${cn}地方では 水国の調査（平成28年度から）に記録なし` }, cn + " 記録なし"));
     }
-    const sub = el("span", { class: "sub" }, `${sp[2] || ""}　${sp[1] || ""}`);
+    if (l2.childNodes.length) ja.append(l2);
+    // 右側: 1 行目に科、2 行目に学名（属から）。長くても切れにくいように分ける（祝 2026-10-28）
+    const sub = el("span", { class: "sub" }, el("span", { class: "fam" }, sp[2] || ""), el("span", { class: "sci" }, sp[1] || ""));
     // 亜種が 2 つ以上ある種は分布も出す（どの亜種か選ぶ手がかり。2026-09-27）
     if (dist[sp[0]]) sub.append(el("span", { class: "dist" }, `分布: ${dist[sp[0]]}`));
     // 工房の注記（目録のみ・水国のみ・和名同・学名異 など）。シノニムに気付く手がかり（2026-09-27）
@@ -854,6 +857,138 @@ function renderMasterSelect() {
   $("#master-hint").textContent = `業務の既定は「${S.bundle.masterDefault || "統合"}」。入力の候補に使うだけで、PC側の集計には影響しません。`;
   $("#bundle-info").textContent = `${S.bundle.case}　作成 ${S.bundle.made}　和名 ${S.bundle.species.length.toLocaleString()} 件　（画面 ${APP_VERSION}）`;
 }
+// ---------------------------------------------------------------- 記録をまとめて移す（☰。地点などを間違えて入れたとき。祝 2026-10-28）
+// 移す先の 地点・その他 は 入力のときと同じ「組み合わせ」の決まりで絞る（restrictByCombos と同じ読み方）
+function comboChoices(m, e, site) {
+  const b = S.bundle, all = b.axes["地点"] || [];
+  const rs = m ? methodRules(m).filter((r) => !r.season || !e || r.season === e) : [];
+  let sites = all, siteNone = false;
+  if (rs.length) {
+    const named = [];
+    for (const r of rs) if (r.site && !isNone(r.site) && !named.includes(r.site)) named.push(r.site);
+    sites = rs.some((r) => !r.site) ? all : all.filter((s) => named.includes(s));
+    siteNone = !sites.length && rs.some((r) => isNone(r.site));
+  }
+  let others = [], otherOff = false;
+  if (!rs.length) {
+    otherOff = rulesOf().length > 0;
+    others = otherOff ? [] : (b.axes["その他"] || []);
+  } else {
+    for (const r of rs) {
+      const siteOk = isNone(r.site) ? !site : (!r.site || r.site === site);
+      if (siteOk && r.other && !isNone(r.other) && !others.includes(r.other)) others.push(r.other);
+    }
+    otherOff = others.length === 0;
+  }
+  return { sites, siteNone, others, otherOff };
+}
+const MV = { rows: [], to: {} };
+function mvRestrict() {
+  const t = MV.to, c = comboChoices(t["採集方法"], t["季節"], t["地点"]);
+  rebuild($("#mv-地点"), c.sites, t["地点"], c.siteNone ? "（地点なし）" : "（未選択）");
+  $("#mv-地点").disabled = c.siteNone;
+  t["地点"] = c.siteNone ? "" : $("#mv-地点").value;
+  const c2 = comboChoices(t["採集方法"], t["季節"], t["地点"]);
+  rebuild($("#mv-その他"), c2.others, t["その他"], "（なし）");
+  $("#mv-その他").disabled = c2.otherOff;
+  t["その他"] = c2.otherOff ? "" : $("#mv-その他").value;
+  mvCheck();
+}
+function mvPicked() { return MV.rows.filter((r, i) => $("#mv-c" + i).checked); }
+function mvCheck() {
+  const pk = mvPicked(), t = MV.to, warn = $("#mv-warn");
+  const done = pk.filter((r) => r.exported).length;
+  const msgs = [];
+  if (done) msgs.push(`書き出し済みが ${done} 件あります。移すと未書き出しに戻り 次の書き出しに入ります。前に書き出した Excel を 入力/ に置いたままにすると 同じ記録が 2 重になるので、その Excel は 入力/ から外してください。`);
+  const toKey = [t["季節"], t["採集方法"], t["地点"], t["その他"] || ""].join("|");
+  if (toKey === MV.fromKey) msgs.push("移す先が今と同じです。");
+  warn.textContent = msgs.join(" ");
+  warn.hidden = !msgs.length;
+  $("#btn-mv-go").disabled = !pk.length || toKey === MV.fromKey;
+  $("#btn-mv-go").textContent = pk.length ? `${pk.length} 件を移す` : "移す";
+}
+function openMove() {
+  if (!S.bundle) return;
+  MV.fromKey = curKey();
+  MV.rows = mine().filter((r) => comboKey(r) === MV.fromKey).sort((a, b) => (b.created - a.created) || (b.id - a.id));
+  if (!MV.rows.length) { toast("今の組み合わせ（季節・採集方法・地点・その他）に記録がありません。上で間違えた組み合わせを選んでから開いてください", 4500); return; }
+  $("#dlg-menu").close();
+  const f = S.axes;
+  $("#mv-from").textContent = `今: ${f["季節"]}・${f["採集方法"]}・${f["地点"] || "（地点なし）"}${f["その他"] ? "・" + f["その他"] : ""}（${MV.rows.length} 件）`;
+  MV.to = { 季節: f["季節"], 採集方法: f["採集方法"], 地点: f["地点"], その他: f["その他"] || "" };
+  for (const a of ["季節", "採集方法"]) {
+    const sel = $("#mv-" + a);
+    rebuild(sel, S.bundle.axes[a] || [], MV.to[a], "（未選択）");
+    sel.onchange = () => { MV.to[a] = sel.value; mvRestrict(); };
+  }
+  $("#mv-地点").onchange = () => { MV.to["地点"] = $("#mv-地点").value; mvRestrict(); };
+  $("#mv-その他").onchange = () => { MV.to["その他"] = $("#mv-その他").value; mvCheck(); };
+  const ul = $("#mv-list"); ul.innerHTML = "";
+  MV.rows.forEach((r, i) => ul.append(el("li", {}, el("label", {},
+    el("input", { type: "checkbox", id: "mv-c" + i, checked: true, onchange: mvCheck }),
+    r.和名 + (r.exported ? "（済）" : ""), el("span", { class: "n" }, `${r.個体数}`)))));
+  $("#mv-all").textContent = "全部の印を外す";
+  $("#mv-all").onclick = () => {
+    const on = !MV.rows.every((r, i) => $("#mv-c" + i).checked);
+    MV.rows.forEach((r, i) => { $("#mv-c" + i).checked = on; });
+    $("#mv-all").textContent = on ? "全部の印を外す" : "全部に印を付ける";
+    mvCheck();
+  };
+  mvRestrict();
+  $("#dlg-move").showModal();
+}
+async function doMove() {
+  const t = MV.to, pk = mvPicked();
+  if (!t["季節"] || !t["採集方法"] || (!t["地点"] && !$("#mv-地点").disabled)) { toast("移す先の 季節・採集方法・地点 を選んでください"); return; }
+  if (!$("#mv-その他").disabled && !t["その他"]) { toast("移す先の「その他」を選んでください"); return; }
+  const toKey = [t["季節"], t["採集方法"], t["地点"], t["その他"] || ""].join("|");
+  const before = new Map();                       // 元に戻すための控え（変える前の記録の写し）
+  const keep = (r) => { if (!before.has(r.id)) before.set(r.id, { ...r }); };
+  const from = { ...S.axes };
+  let merged = 0;
+  for (const r of pk) {
+    const same = mine().find((x) => x !== r && x.和名 === r.和名 && comboKey(x) === toKey);
+    keep(r);
+    if (same) {                                   // 移す先に同じ種: 個体数を足して 1 行に。備考はつなぐ
+      keep(same);
+      same.個体数 = (parseInt(same.個体数, 10) || 0) + (parseInt(r.個体数, 10) || 0);
+      if (r.備考 && r.備考 !== same.備考) same.備考 = same.備考 ? `${same.備考}／${r.備考}` : r.備考;
+      same.updated = Date.now(); same.exported = 0;
+      await putRecord(same);
+      await delRecord(r.id);
+      S.records = S.records.filter((x) => x.id !== r.id);
+      merged++;
+    } else {
+      r.季節 = t["季節"]; r.採集方法 = t["採集方法"]; r.地点 = t["地点"]; r.その他 = t["その他"] || "";
+      r.updated = Date.now(); r.exported = 0;
+      await putRecord(r);
+    }
+  }
+  $("#dlg-move").close();
+  // 移した先を開いて見せる
+  for (const a of AXES) S.axes[a] = t[a] || "";
+  buildAxisSelects(); kvSet("axes", S.axes); renderList();
+  const where = `${t["季節"]}・${t["採集方法"]}・${t["地点"] || "（地点なし）"}${t["その他"] ? "・" + t["その他"] : ""}`;
+  showUndo(`${pk.length} 件を ${where} へ移しました` + (merged ? `（${merged} 件は同じ種に足した）` : ""), async () => {
+    for (const [id, o] of before) {
+      await putRecord(o);
+      const i = S.records.findIndex((x) => x.id === id);
+      if (i >= 0) S.records[i] = o; else S.records.push(o);
+    }
+    for (const a of AXES) S.axes[a] = from[a] || "";
+    buildAxisSelects(); kvSet("axes", S.axes); renderList();
+    toast("移す前に戻しました");
+  });
+}
+// 「元に戻す」の帯（下に 10 秒）
+function showUndo(msg, fn) {
+  const old = document.getElementById("undo-bar"); if (old) old.remove();
+  const bar = el("div", { class: "undo", id: "undo-bar" }, el("span", {}, msg));
+  const btn = el("button", { type: "button", onclick: async () => { bar.remove(); await fn(); } }, "元に戻す");
+  bar.append(btn);
+  document.body.append(bar);
+  setTimeout(() => bar.remove(), 10000);
+}
 function openMenu() {
   if (S.bundle) renderMasterSelect();
   const all = mine(), pend = all.filter((r) => !r.exported).length;
@@ -915,6 +1050,10 @@ async function boot() {
   $("#btn-export-all").onclick = () => { $("#dlg-menu").close(); exportRecords(true); };
   $("#btn-menu").onclick = openMenu;
   $("#btn-close-menu").onclick = () => $("#dlg-menu").close();
+  $("#btn-move").onclick = openMove;
+  $("#btn-move2").onclick = openMove;
+  $("#btn-mv-cancel").onclick = () => $("#dlg-move").close();
+  $("#btn-mv-go").onclick = doMove;
   $("#btn-clear-exported").onclick = async () => {
     const done = mine().filter((r) => r.exported);
     if (!done.length || !confirm(`この業務の書き出し済み ${done.length} 件を端末から消します。Excel にはもう入っています。よいですか？`)) return;
@@ -950,7 +1089,13 @@ async function boot() {
   window.addEventListener("pageshow", async (e) => { if (e.persisted && S.bundle) { await loadGenchi(); renderList(); } });
 
   if (!("indexedDB" in window)) $("#banner").hidden = false, $("#banner").textContent = "このブラウザでは記録を保存できません。";
-  if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost" || location.hostname === "127.0.0.1")) {
+  const pcLocal = location.hostname === "localhost" || location.hostname === "127.0.0.1";
+  if (pcLocal && "serviceWorker" in navigator) {
+    // PC（操作画面のデータ入力・試しのサーバ）は 画面の控えを使わない。前に入った控えも外す（地図のタイルの控えは残す）。祝 2026-10-28
+    navigator.serviceWorker.getRegistrations().then((rs) => rs.forEach((r) => r.unregister())).catch(() => {});
+    if (window.caches) caches.keys().then((ks) => ks.filter((k) => k !== "gsi-tiles").forEach((k) => caches.delete(k))).catch(() => {});
+  }
+  if ("serviceWorker" in navigator && location.protocol === "https:") {
     navigator.serviceWorker.register("./sw.js").catch(() => {});
     // 新しい版が裏で入ったら 上に知らせる。押すまで読み直さない（入力の途中で画面を変えない。祝 2026-10-04）
     const hadCtl = !!navigator.serviceWorker.controller;
