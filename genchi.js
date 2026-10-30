@@ -11,7 +11,7 @@
  */
 (() => {
 "use strict";
-const GENCHI_VERSION = "g27";
+const GENCHI_VERSION = "g28";
 const $ = (s) => document.querySelector(s);
 const el = (t, attrs = {}, ...kids) => {
   const e = document.createElement(t);
@@ -272,8 +272,8 @@ function applyMapdata(md) {
   jobLayer = L.geoJSON(md.地図, {
     style: (f) => (f.geometry.type === "Point" ? {} : { color: f.properties.色 || "#1565c0", weight: 3, fill: false, dashArray: /バッファ/.test(f.properties.名前) ? "6 6" : null }),
     pointToLayer: (f, ll) => L.circleMarker(ll, { radius: 6, color: "#333", weight: 1.5, fillColor: "#ffd600", fillOpacity: 1 })
-      .bindTooltip(f.properties.名前, { permanent: true, direction: "right", className: "lbl", offset: [6, 0] }),
-    onEachFeature: (f, ly) => { if (f.geometry.type !== "Point") ly.bindTooltip(f.properties.名前, { sticky: true }); },
+      .bindTooltip(el("span", {}, f.properties.名前), { permanent: true, direction: "right", className: "lbl", offset: [6, 0] }),   // 札は文字として出す（HTML にしない）
+    onEachFeature: (f, ly) => { if (f.geometry.type !== "Point") ly.bindTooltip(el("span", {}, f.properties.名前), { sticky: true }); },
   }).addTo(map);
   if (vegLayer && map.hasLayer(vegLayer)) vegLayer.bringToBack();
   $("#map-info").textContent = `${md.業務}（作成 ${md.作成}・地図 ${md.地図.features.length}・植生図 ${(md.植生図 || { features: [] }).features.length}）` + (S.vegSaved ? `。保存した植生図 ${S.vegSaved.features.length}` : "");
@@ -287,21 +287,26 @@ function vegAt(lat, lon) {
   return null;
 }
 // 吹き出し: 植生図の凡例（押したポリゴン）＋ 地質図を出していればその所の地質
+// 中身は要素で組む（凡例名・植物名・地質の答えは外から来る文字なので HTML の文字列にしない）
 function infoPopup(ll, vp) {
-  let html = "";
+  const box = el("div");
   if (vp) {
     const pl = ((S.mapdata && S.mapdata.凡例の植物) || {})[String(vp.凡例コード)];
-    html = `<b>${vp.凡例名}</b>` + (pl ? `<br>主な植物（調査地点 ${pl.調査地点数}）: ${pl.植物.slice(0, 6).map((x) => `${x[0]}(${Math.round(x[1])}%)`).join("・")}` : "<br>調査の地点なし");
+    box.append(el("b", {}, `${vp.凡例名}`), el("br"),
+      pl ? `主な植物（調査地点 ${pl.調査地点数}）: ${pl.植物.slice(0, 6).map((x) => `${x[0]}(${Math.round(x[1])}%)`).join("・")}` : "調査の地点なし");
   }
   const geoOn = geoTiles && map.hasLayer(geoTiles);
-  if (!html && !geoOn) return;
-  const pop = L.popup({ maxWidth: 280 }).setLatLng(ll).setContent(html + (geoOn ? (html ? "<br>" : "") + "地質: 調べています…" : "")).openOn(map);
-  if (geoOn) geoAt(ll.lat, ll.lng).then((g) => pop.setContent(html + (html ? "<br>" : "") + geoHtml(g)));
+  if (!vp && !geoOn) return;
+  const geo = el("span", {}, "地質: 調べています…");
+  if (geoOn) { if (vp) box.append(el("br")); box.append(geo); }
+  const pop = L.popup({ maxWidth: 280 }).setLatLng(ll).setContent(box).openOn(map);
+  if (geoOn) geoAt(ll.lat, ll.lng).then((g) => { geo.replaceChildren(...geoNodes(g)); pop.setContent(box); });
 }
-function geoHtml(g) {
-  if (!g) return "地質: 分かりません（電波が無く、この所の地質図を保存していない）";
-  if (g.外) return "地質: 地質図の外（海・湖など）";
-  return `地質: <b>${g.岩相}</b><br><small>${g.大区分}・${g.時代}${g.圏外 ? "（保存した地質図の色から）" : ""}<br>20 万分の 1 の粗い参考</small>`;
+function geoNodes(g) {
+  if (!g) return ["地質: 分かりません（電波が無く、この所の地質図を保存していない）"];
+  if (g.外) return ["地質: 地質図の外（海・湖など）"];
+  return ["地質: ", el("b", {}, `${g.岩相}`), el("br"),
+    el("small", {}, `${g.大区分}・${g.時代}${g.圏外 ? "（保存した地質図の色から）" : ""}`, el("br"), "20 万分の 1 の粗い参考")];
 }
 // その所の地質（産総研 シームレス地質図V2）。電波があれば凡例の Web API、無ければ貯めた「地質の色」の画像（縮尺 13）の色を保存した凡例と照らす
 const geoOf = (d) => ({ 記号: d.symbol || "", 時代: d.formationAge_ja || "", 大区分: d.group_ja || "", 岩相: d.lithology_ja || "" });
@@ -413,7 +418,7 @@ function drawPoints() {
     const icon = L.divIcon({ className: "", html: `<span class="num" style="background:${ptColor(p)};${old ? "opacity:.6" : ""}">${p.no}</span>`, iconSize: [22, 22], iconAnchor: [11, 11] });
     const m = L.marker([p.lat, p.lon], { icon, draggable: S.moving && S.cur && S.cur.id === p.id });
     const names = p.recs.filter((r) => r.和名).map(dname);
-    if (names.length) m.bindTooltip((old ? p.day.slice(5) + " " : "") + names.slice(0, 2).join("・") + (names.length > 2 ? " ほか" : ""), { permanent: true, direction: "right", className: "lbl", offset: [10, 0] });
+    if (names.length) m.bindTooltip(el("span", {}, (old ? p.day.slice(5) + " " : "") + names.slice(0, 2).join("・") + (names.length > 2 ? " ほか" : "")), { permanent: true, direction: "right", className: "lbl", offset: [10, 0] });
     m.on("click", () => { if (!leaveOk()) return; openPoint(p); });
     m.on("dragend", async () => {
       const ll = m.getLatLng();

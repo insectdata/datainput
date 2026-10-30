@@ -40,14 +40,14 @@ function render() {
       ly = L.marker([f.coords[1], f.coords[0]], { draggable: true, icon: L.divIcon({ className: "", iconSize: [16, 16], iconAnchor: [8, 8],
         html: `<div style="width:14px;height:14px;border-radius:50%;background:${col};border:2px solid ${sel ? "#1565c0" : "#333"};box-shadow:${sel ? "0 0 0 3px #90caf9" : "none"}"></div>` }) });
       ly.on("dragend", () => { const p = ly.getLatLng(); f.coords = [p.lng, p.lat]; save(); });
-      if (f.name) ly.bindTooltip(f.name, { permanent: true, direction: "right", className: "lbl", offset: [8, 0] });
+      if (f.name) ly.bindTooltip(el("span", {}, f.name), { permanent: true, direction: "right", className: "lbl", offset: [8, 0] });   // 文字として出す（読み込んだファイルの名前）
     } else {
       const ll = (ring) => ring.map((c) => [c[1], c[0]]);
       const st = { color: col, weight: sel ? 5 : 3, dashArray: dash, fillOpacity: f.kind === "バッファ" ? 0 : 0.08 };
       if (f.type === "LineString") ly = L.polyline(ll(f.coords), st);
       else if (f.type === "Polygon") ly = L.polygon(f.coords.map(ll), st);
       else ly = L.polygon(f.coords.map((pg) => pg.map(ll)), st);
-      if (f.name) ly.bindTooltip(f.name, { sticky: true });
+      if (f.name) ly.bindTooltip(el("span", {}, f.name), { sticky: true });
     }
     ly.on("click", (e) => { if (S.mode) return; L.DomEvent.stopPropagation(e); pick(f.id, e.originalEvent && (e.originalEvent.ctrlKey || e.originalEvent.metaKey)); });
     group.addLayer(ly);
